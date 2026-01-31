@@ -1,7 +1,7 @@
 import asyncio
 import random
 import sys
-import time
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page
 from bs4 import BeautifulSoup
 import html2text
@@ -53,8 +53,7 @@ class StealthScraper:
             java_script_enabled=True,
         )
 
-        # Basic stealth - removing 'webdriver' and mocking basics
-        # Removed the amateur canvas poisoning as it is a major detection signal
+        # Basic stealth
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -64,33 +63,30 @@ class StealthScraper:
         page = await context.new_page()
         content = ""
         try:
-            # Simple logging - path/query secrets exist, so we just log the action
-            print(f"Requesting URL...")
+            # Secure domain-only logging
+            domain = urlparse(url).netloc
+            print(f"Fetching {domain}...")
             
-            # Reverted to 60s timeout to handle slow loads/rate limits
+            # 60s timeout for page load
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            # Add a random human-like jitter
+            # Human-like jitter
             await asyncio.sleep(random.uniform(1.5, 3.0))
 
             # Specific handling for X.com / Twitter
             if "x.com" in url or "twitter.com" in url:
-                # Wait for content to actually load
                 try:
+                    # Increased to 30s to handle X.com rate-limiting/slowness
                     await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
-                    # Scroll to trigger lazy loading
                     await page.evaluate("window.scrollBy(0, 500)")
                     await asyncio.sleep(2) 
-                except Exception as e:
-                    print(f"Selector Warning: {type(e).__name__}", file=sys.stderr)
+                except Exception:
+                    # Log failure to stderr without stopping execution
+                    print(f"Warning: Tweet selector timeout for {domain}", file=sys.stderr)
 
-            # Get final rendered content
+            # Get rendered content
             content = await page.content()
             
-        except Exception as e:
-            # Proper error reporting - no more silent swallowing
-            print(f"Critical Fetch Error: {type(e).__name__} - {str(e)}", file=sys.stderr)
-            raise e
         finally:
             await context.close()
 
@@ -113,7 +109,6 @@ class StealthScraper:
         
         markdown = converter.handle(str(soup))
         
-        # Removed the broken regex scrubbing and "Sandbox" ASCII art
         # Security Note: User must treat this output as untrusted data.
         return markdown
 
@@ -135,7 +130,8 @@ if __name__ == "__main__":
             else:
                 print("No content fetched.", file=sys.stderr)
         except Exception as e:
-            print(f"Fatal: {e}", file=sys.stderr)
+            # Centralized error reporting
+            print(f"Fatal Error: {type(e).__name__} - {e}", file=sys.stderr)
             sys.exit(1)
         finally:
             await scraper.stop()
