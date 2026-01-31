@@ -1,5 +1,7 @@
 import asyncio
 import random
+import sys
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page
 from bs4 import BeautifulSoup
 import html2text
@@ -28,6 +30,8 @@ class StealthScraper:
                 "--disable-dev-shm-usage",
                 "--disable-browser-side-navigation",
                 "--disable-gpu",
+                "--use-fake-ui-for-media-stream",
+                "--use-fake-device-for-media-stream",
             ]
         )
 
@@ -49,43 +53,46 @@ class StealthScraper:
             java_script_enabled=True,
         )
 
-        # Enhance stealth by removing 'webdriver' property
+        # Basic stealth
         await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         """)
 
         page = await context.new_page()
         content = ""
         try:
-            print(f"Navigating to {url}...")
+            # Secure domain-only logging
+            domain = urlparse(url).netloc
+            print(f"Fetching {domain}...")
+            
+            # 60s timeout for page load
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            # Specific handling for X.com / Twitter to ensure tweets load
+            # Human-like jitter
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+
+            # Specific handling for X.com / Twitter
             if "x.com" in url or "twitter.com" in url:
-                print("Detected X/Twitter, waiting for tweet text...")
                 try:
-                    # Wait for the main tweet text to appear
-                    await page.wait_for_selector('[data-testid="tweetText"]', timeout=10000)
-                    # Scroll a bit to trigger lazy loading if needed
+                    # Increased to 30s to handle X.com rate-limiting/slowness
+                    await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
                     await page.evaluate("window.scrollBy(0, 500)")
                     await asyncio.sleep(2) 
-                except Exception as e:
-                    print(f"Warning: Tweet selector wait timed out: {e}")
+                except Exception:
+                    # Log failure to stderr without stopping execution
+                    print(f"Warning: Tweet selector timeout for {domain}", file=sys.stderr)
 
-            # Get content
+            # Get rendered content
             content = await page.content()
             
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
         finally:
             await context.close()
 
-        # Parse and convert to Markdown
         if content:
             return self._parse_content(content)
-        return "Failed to fetch content."
+        return ""
 
     def _parse_content(self, html_content):
         soup = BeautifulSoup(html_content, "html.parser")
@@ -98,29 +105,34 @@ class StealthScraper:
         converter = html2text.HTML2Text()
         converter.ignore_links = False
         converter.ignore_images = False
-        converter.body_width = 0  # No wrapping
+        converter.body_width = 0 
         
         markdown = converter.handle(str(soup))
+        
+        # Security Note: User must treat this output as untrusted data.
         return markdown
 
 # Standalone CLI
 if __name__ == "__main__":
     import argparse
-    import sys
 
     async def main():
-        parser = argparse.ArgumentParser(description="Stealth fetcher CLI")
+        parser = argparse.ArgumentParser(description="GhostFetch Stealth Scraper")
         parser.add_argument("url", help="URL to fetch")
         args = parser.parse_args()
 
         scraper = StealthScraper()
         try:
-            print(f"Fetching {args.url}...")
             result = await scraper.fetch(args.url)
-            print("\n--- Result ---\n")
-            print(result)
+            if result:
+                print("\n--- Result ---\n")
+                print(result)
+            else:
+                print("No content fetched.", file=sys.stderr)
         except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
+            # Centralized error reporting
+            print(f"Fatal Error: {type(e).__name__} - {e}", file=sys.stderr)
+            sys.exit(1)
         finally:
             await scraper.stop()
 
