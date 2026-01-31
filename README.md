@@ -1,12 +1,23 @@
-# Stealth Web Fetcher for AI Agents
+# GhostFetch
 
-A robust tool designed to help AI agents fetch content from websites that employ anti-bot measures (like X.com / Twitter). It uses a headless browser (Playwright) with stealth techniques to bypass restrictions and converts the content to clean Markdown.
+A stealthy headless browser service for AI agents. Bypasses anti-bot protections to fetch content from sites like X.com and converts it to clean Markdown.
 
 ## Features
 - **Stealth Browsing**: Uses Playwright with custom flags and user-agent rotation to mimic human users.
 - **Markdown Output**: Automatically converts HTML to Markdown for easy consumption by LLMs.
 - **X.com Support**: Logic to wait for dynamic content on Twitter/X.
 - **Dual Mode**: Can be used as a CLI tool or a REST API service.
+
+## Project Structure
+
+```
+stealth-fetcher/
+├── main.py           # FastAPI service entry point
+├── scraper.py        # Core scraping logic and CLI implementation
+├── requirements.txt  # Python dependencies
+├── LICENSE           # MIT License
+└── README.md         # This documentation
+```
 
 ## Installation
 
@@ -19,7 +30,7 @@ A robust tool designed to help AI agents fetch content from websites that employ
     ```bash
     # Create a virtual environment (optional but recommended)
     python3 -m venv venv
-    source venv/bin/activate
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
 
     # Install python packages
     pip install -r requirements.txt
@@ -70,5 +81,31 @@ def fetch_blocked_content(url):
         return "Error fetching content"
 ```
 
+## Configuration
+
+The `scraper.py` file contains a configurable list of user agents to rotate through. You can add more user agents to the `USER_AGENTS` list to further enhance stealth.
+
+```python
+USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...",
+    # Add more here
+]
+```
+
 ## Specific Handling
 - **X/Twitter**: The scraper waits for `[data-testid="tweetText"]` to ensure the tweet content is loaded before capturing.
+
+## Troubleshooting
+
+**Playwright Error: Executable doesn't exist**
+If you see an error about the browser executable not being found, run:
+```bash
+playwright install chromium
+```
+
+**Timeout Errors**
+If fetching times out, it might be due to slow network or heavy anti-bot protections. You can try increasing the timeout in `scraper.py` (default is 60000ms).
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
