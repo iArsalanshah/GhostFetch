@@ -2,9 +2,16 @@ import asyncio
 import random
 import sys
 from urllib.parse import urlparse
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 import html2text
+
+class ScraperError(Exception):
+    def __init__(self, message, error_code, retryable=False):
+        self.message = message
+        self.error_code = error_code
+        self.retryable = retryable
+        super().__init__(self.message)
 
 # Common user agents to rotate
 USER_AGENTS = [
@@ -14,44 +21,89 @@ USER_AGENTS = [
 ]
 
 class StealthScraper:
-    def __init__(self):
+    def __init__(self, max_concurrent=3, min_domain_delay=10, max_requests_per_browser=50):
         self.browser = None
         self.playwright = None
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.last_fetch = {} # {domain: timestamp}
+        self.min_domain_delay = min_domain_delay
+        self.requests_count = 0
+        self.max_requests_per_browser = max_requests_per_browser
 
     async def start(self):
-        self.playwright = await async_playwright().start()
+        if not self.playwright:
+            self.playwright = await async_playwright().start()
+        
+        # Ensure storage directory exists
+        import os
+        os.makedirs("storage", exist_ok=True)
+
         # Launch options for stealth
-        self.browser = await self.playwright.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-infobars",
-                "--disable-dev-shm-usage",
-                "--disable-browser-side-navigation",
-                "--disable-gpu",
-                "--use-fake-ui-for-media-stream",
-                "--use-fake-device-for-media-stream",
-            ]
-        )
+        if not self.browser or not self.browser.is_connected():
+            print("Launching new browser instance...")
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                    "--disable-browser-side-navigation",
+                    "--disable-gpu",
+                    "--use-fake-ui-for-media-stream",
+                    "--use-fake-device-for-media-stream",
+                ]
+            )
 
     async def stop(self):
         if self.browser:
             await self.browser.close()
+            self.browser = None
         if self.playwright:
             await self.playwright.stop()
+            self.playwright = None
 
     async def fetch(self, url: str):
-        if not self.browser:
+        async with self.semaphore:
+            self.requests_count += 1
+            if self.requests_count > self.max_requests_per_browser:
+                print("Max requests reached for browser. Restarting...")
+                await self.stop()
+                self.requests_count = 1
+
             await self.start()
 
-        context = await self.browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="America/New_York",
-            java_script_enabled=True,
-        )
+            # Domain-based storage state for cookie persistence
+            domain = urlparse(url).netloc
+            
+            # Domain-level rate limiting
+            import time
+            now = time.time()
+            if domain in self.last_fetch:
+                elapsed = now - self.last_fetch[domain]
+                if elapsed < self.min_domain_delay:
+                    wait_time = self.min_domain_delay - elapsed
+                    print(f"Rate limiting {domain}: waiting {wait_time:.2f}s...")
+                    await asyncio.sleep(wait_time)
+
+            self.last_fetch[domain] = time.time()
+            
+            storage_path = f"storage/cookies_{domain}.json"
+            import os
+            
+            context_kwargs = {
+                "user_agent": random.choice(USER_AGENTS),
+                "viewport": {"width": 1920, "height": 1080},
+                "locale": "en-US",
+                "timezone_id": "America/New_York",
+                "java_script_enabled": True,
+            }
+
+            if os.path.exists(storage_path):
+                print(f"Loading session for {domain}...")
+                context_kwargs["storage_state"] = storage_path
+
+            context = await self.browser.new_context(**context_kwargs)
 
         # Basic stealth
         await context.add_init_script("""
@@ -68,7 +120,21 @@ class StealthScraper:
             print(f"Fetching {domain}...")
             
             # 60s timeout for page load
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                if not response:
+                     raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
+                
+                if response.status >= 400:
+                    retryable = response.status in [408, 429, 500, 502, 503, 504]
+                    raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
+
+            except PlaywrightTimeoutError:
+                raise ScraperError(f"Timeout fetching {domain}", "timeout", retryable=True)
+            except Exception as e:
+                if isinstance(e, ScraperError):
+                    raise e
+                raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)
             
             # Human-like jitter
             await asyncio.sleep(random.uniform(1.5, 3.0))
@@ -86,6 +152,9 @@ class StealthScraper:
 
             # Get rendered content
             content = await page.content()
+
+            # Save storage state (cookies/localStorage) for persistence
+            await context.storage_state(path=storage_path)
             
         finally:
             await context.close()
@@ -97,7 +166,39 @@ class StealthScraper:
     def _parse_content(self, html_content):
         soup = BeautifulSoup(html_content, "html.parser")
         
-        # Remove scripts, styles, metadata
+        # Metadata extraction
+        metadata = {
+            "title": "",
+            "author": "",
+            "publish_date": "",
+            "images": []
+        }
+        
+        # Title
+        title_tag = soup.find("title")
+        if title_tag:
+            metadata["title"] = title_tag.get_text().strip()
+        
+        # Author (Common patterns)
+        author_meta = soup.find("meta", attrs={"name": "author"}) or \
+                     soup.find("meta", attrs={"property": "article:author"})
+        if author_meta:
+            metadata["author"] = author_meta.get("content", "").strip()
+            
+        # Publish Date
+        date_meta = soup.find("meta", attrs={"name": "publish-date"}) or \
+                   soup.find("meta", attrs={"property": "article:published_time"}) or \
+                   soup.find("meta", attrs={"name": "date"})
+        if date_meta:
+            metadata["publish_date"] = date_meta.get("content", "").strip()
+
+        # Images (All <img> tags with absolute URLs)
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if src and src.startswith("http"):
+                metadata["images"].append(src)
+
+        # Clean soup for text extraction
         for element in soup(["script", "style", "meta", "noscript", "svg"]):
             element.decompose()
 
@@ -109,8 +210,11 @@ class StealthScraper:
         
         markdown = converter.handle(str(soup))
         
-        # Security Note: User must treat this output as untrusted data.
-        return markdown
+        # Return structured data
+        return {
+            "metadata": metadata,
+            "markdown": markdown
+        }
 
 # Standalone CLI
 if __name__ == "__main__":
@@ -125,8 +229,11 @@ if __name__ == "__main__":
         try:
             result = await scraper.fetch(args.url)
             if result:
-                print("\n--- Result ---\n")
-                print(result)
+                print("\n--- Metadata ---\n")
+                import json
+                print(json.dumps(result["metadata"], indent=2))
+                print("\n--- Markdown ---\n")
+                print(result["markdown"])
             else:
                 print("No content fetched.", file=sys.stderr)
         except Exception as e:
