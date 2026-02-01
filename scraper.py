@@ -1,10 +1,31 @@
 import asyncio
 import random
 import sys
+import logging
+import time
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 import html2text
+import os
+from config import settings
+
+from logging.handlers import RotatingFileHandler
+import time
+
+# Setup logging
+os.makedirs(settings.STORAGE_DIR, exist_ok=True)
+log_path = os.path.join(settings.STORAGE_DIR, "scraper.log")
+handler = RotatingFileHandler(log_path, maxBytes=5*1024*1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        handler
+    ]
+)
+logger = logging.getLogger("GhostFetch")
 
 class ScraperError(Exception):
     def __init__(self, message, error_code, retryable=False):
@@ -21,26 +42,24 @@ USER_AGENTS = [
 ]
 
 class StealthScraper:
-    def __init__(self, max_concurrent=3, min_domain_delay=10, max_requests_per_browser=50):
+    def __init__(self):
         self.browser = None
         self.playwright = None
-        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_BROWSERS)
+        self.restart_lock = asyncio.Lock()
         self.last_fetch = {} # {domain: timestamp}
-        self.min_domain_delay = min_domain_delay
         self.requests_count = 0
-        self.max_requests_per_browser = max_requests_per_browser
 
     async def start(self):
         if not self.playwright:
             self.playwright = await async_playwright().start()
         
         # Ensure storage directory exists
-        import os
-        os.makedirs("storage", exist_ok=True)
+        os.makedirs(settings.STORAGE_DIR, exist_ok=True)
 
         # Launch options for stealth
         if not self.browser or not self.browser.is_connected():
-            print("Launching new browser instance...")
+            logger.info("Launching new browser instance...")
             self.browser = await self.playwright.chromium.launch(
                 headless=True,
                 args=[
@@ -65,31 +84,29 @@ class StealthScraper:
 
     async def fetch(self, url: str):
         async with self.semaphore:
-            self.requests_count += 1
-            if self.requests_count > self.max_requests_per_browser:
-                print("Max requests reached for browser. Restarting...")
-                await self.stop()
-                self.requests_count = 1
-
-            await self.start()
+            async with self.restart_lock:
+                self.requests_count += 1
+                if self.requests_count > settings.MAX_REQUESTS_PER_BROWSER:
+                    logger.info("Max requests reached for browser. Restarting...")
+                    await self.stop()
+                    self.requests_count = 1
+                await self.start()
 
             # Domain-based storage state for cookie persistence
             domain = urlparse(url).netloc
             
             # Domain-level rate limiting
-            import time
             now = time.time()
             if domain in self.last_fetch:
                 elapsed = now - self.last_fetch[domain]
-                if elapsed < self.min_domain_delay:
-                    wait_time = self.min_domain_delay - elapsed
-                    print(f"Rate limiting {domain}: waiting {wait_time:.2f}s...")
+                if elapsed < settings.MIN_DOMAIN_DELAY:
+                    wait_time = settings.MIN_DOMAIN_DELAY - elapsed
+                    logger.info(f"Rate limiting {domain}: waiting {wait_time:.2f}s...")
                     await asyncio.sleep(wait_time)
 
             self.last_fetch[domain] = time.time()
             
-            storage_path = f"storage/cookies_{domain}.json"
-            import os
+            storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
             
             context_kwargs = {
                 "user_agent": random.choice(USER_AGENTS),
@@ -100,7 +117,7 @@ class StealthScraper:
             }
 
             if os.path.exists(storage_path):
-                print(f"Loading session for {domain}...")
+                logger.debug(f"Loading session for {domain}...")
                 context_kwargs["storage_state"] = storage_path
 
             context = await self.browser.new_context(**context_kwargs)
@@ -116,7 +133,7 @@ class StealthScraper:
             content = ""
             try:
                 # Secure domain-only logging
-                print(f"Fetching {domain}...")
+                logger.info(f"Fetching {domain}...")
                 
                 # 60s timeout for page load
                 try:
@@ -146,8 +163,7 @@ class StealthScraper:
                         await page.evaluate("window.scrollBy(0, 500)")
                         await asyncio.sleep(2) 
                     except Exception:
-                        # Log failure to stderr without stopping execution
-                        print(f"Warning: Tweet selector timeout for {domain}", file=sys.stderr)
+                        logger.warning(f"Tweet selector timeout for {domain}")
 
                 # Get rendered content
                 content = await page.content()
@@ -215,6 +231,9 @@ class StealthScraper:
             "markdown": markdown
         }
 
+    def get_active_contexts_count(self):
+        return settings.MAX_CONCURRENT_BROWSERS - self.semaphore._value
+
 # Standalone CLI
 if __name__ == "__main__":
     import argparse
@@ -228,16 +247,16 @@ if __name__ == "__main__":
         try:
             result = await scraper.fetch(args.url)
             if result:
+                logger.info("Successfully fetched and parsed content.")
                 print("\n--- Metadata ---\n")
                 import json
                 print(json.dumps(result["metadata"], indent=2))
                 print("\n--- Markdown ---\n")
                 print(result["markdown"])
             else:
-                print("No content fetched.", file=sys.stderr)
+                logger.error("No content fetched.")
         except Exception as e:
-            # Centralized error reporting
-            print(f"Fatal Error: {type(e).__name__} - {e}", file=sys.stderr)
+            logger.critical(f"Fatal Error: {type(e).__name__} - {e}")
             sys.exit(1)
         finally:
             await scraper.stop()
