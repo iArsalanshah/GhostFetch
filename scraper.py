@@ -105,63 +105,62 @@ class StealthScraper:
 
             context = await self.browser.new_context(**context_kwargs)
 
-        # Basic stealth
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        """)
+            # Basic stealth
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            """)
 
-        page = await context.new_page()
-        content = ""
-        try:
-            # Secure domain-only logging
-            domain = urlparse(url).netloc
-            print(f"Fetching {domain}...")
-            
-            # 60s timeout for page load
+            page = await context.new_page()
+            content = ""
             try:
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                if not response:
-                     raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
+                # Secure domain-only logging
+                print(f"Fetching {domain}...")
                 
-                if response.status >= 400:
-                    retryable = response.status in [408, 429, 500, 502, 503, 504]
-                    raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
-
-            except PlaywrightTimeoutError:
-                raise ScraperError(f"Timeout fetching {domain}", "timeout", retryable=True)
-            except Exception as e:
-                if isinstance(e, ScraperError):
-                    raise e
-                raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)
-            
-            # Human-like jitter
-            await asyncio.sleep(random.uniform(1.5, 3.0))
-
-            # Specific handling for X.com / Twitter
-            if "x.com" in url or "twitter.com" in url:
+                # 60s timeout for page load
                 try:
-                    # Increased to 30s to handle X.com rate-limiting/slowness
-                    await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
-                    await page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(2) 
-                except Exception:
-                    # Log failure to stderr without stopping execution
-                    print(f"Warning: Tweet selector timeout for {domain}", file=sys.stderr)
+                    response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    if not response:
+                         raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
+                    
+                    if response.status >= 400:
+                        retryable = response.status in [408, 429, 500, 502, 503, 504]
+                        raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
 
-            # Get rendered content
-            content = await page.content()
+                except PlaywrightTimeoutError:
+                    raise ScraperError(f"Timeout fetching {domain}", "timeout", retryable=True)
+                except Exception as e:
+                    if isinstance(e, ScraperError):
+                        raise e
+                    raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)
+                
+                # Human-like jitter
+                await asyncio.sleep(random.uniform(1.5, 3.0))
 
-            # Save storage state (cookies/localStorage) for persistence
-            await context.storage_state(path=storage_path)
-            
-        finally:
-            await context.close()
+                # Specific handling for X.com / Twitter
+                if "x.com" in url or "twitter.com" in url:
+                    try:
+                        # Increased to 30s to handle X.com rate-limiting/slowness
+                        await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
+                        await page.evaluate("window.scrollBy(0, 500)")
+                        await asyncio.sleep(2) 
+                    except Exception:
+                        # Log failure to stderr without stopping execution
+                        print(f"Warning: Tweet selector timeout for {domain}", file=sys.stderr)
 
-        if content:
-            return self._parse_content(content)
-        return ""
+                # Get rendered content
+                content = await page.content()
+
+                # Save storage state (cookies/localStorage) for persistence
+                await context.storage_state(path=storage_path)
+                
+            finally:
+                await context.close()
+
+            if content:
+                return self._parse_content(content)
+            return ""
 
     def _parse_content(self, html_content):
         soup = BeautifulSoup(html_content, "html.parser")
