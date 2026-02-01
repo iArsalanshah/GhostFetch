@@ -310,6 +310,131 @@ docker-compose --env-file .env up
 ## Specific Handling
 - **X/Twitter**: The scraper waits for `[data-testid="tweetText"]` to ensure the tweet content is loaded before capturing.
 
+## ⚠️ Important: Rate Limiting & Ethics
+
+This tool bypasses anti-bot protections. **Use responsibly:**
+
+- **Respect robots.txt** - Check site policies before scraping
+- **Implement delays** - Use `MIN_DOMAIN_DELAY` (default: 10 seconds) to avoid overloading servers
+- **Throttle requests** - Reduce `MAX_CONCURRENT_BROWSERS` for high-volume scraping
+- **Terms of Service** - Ensure your use complies with target site's ToS
+- **Authentication** - When possible, use authorized access instead of bypassing protections
+
+### Recommended Settings for Production
+```bash
+# Conservative (respectful scraping)
+MIN_DOMAIN_DELAY=30
+MAX_CONCURRENT_BROWSERS=1
+
+# Moderate
+MIN_DOMAIN_DELAY=15
+MAX_CONCURRENT_BROWSERS=2
+
+# Aggressive (only for your own content)
+MIN_DOMAIN_DELAY=5
+MAX_CONCURRENT_BROWSERS=4
+```
+
+## Production Deployment Guide
+
+### 1. Proxy Support (Recommended for High-Volume)
+
+For serious stealth, rotate through residential proxies:
+
+```python
+# Modify scraper.py to use proxies
+context = await browser.new_context(
+    proxy={
+        "server": "http://proxy-provider.com:8080",
+        "username": "user",
+        "password": "pass"
+    },
+    **context_kwargs
+)
+```
+
+**Recommended proxy providers:**
+- BrightData (datacenter/residential)
+- ScrapingBee (cloud-based)
+- Oxylabs (residential networks)
+- Local proxy rotation with tools like `scrapy-proxy-pool`
+
+### 2. Caching Layer (Reduce Redundant Requests)
+
+For repeated fetches, implement Redis caching:
+
+```python
+import redis
+
+cache = redis.Redis(host='localhost', port=6379)
+
+async def fetch_with_cache(url, ttl=3600):
+    cached = cache.get(url)
+    if cached:
+        return json.loads(cached)
+    
+    result = await scraper.fetch(url)
+    cache.setex(url, ttl, json.dumps(result))
+    return result
+```
+
+**Docker Compose with Redis:**
+```yaml
+services:
+  ghostfetch:
+    build: .
+    ports:
+      - "8000:8000"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+```
+
+### 3. Security & Authentication
+
+Add API key authentication before exposing publicly:
+
+```python
+from fastapi import Header, HTTPException
+
+VALID_API_KEYS = set(os.getenv("API_KEYS", "").split(","))
+
+@app.post("/fetch")
+async def fetch_endpoint(request: FetchRequest, x_api_key: str = Header(None)):
+    if not x_api_key or x_api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    # ... rest of endpoint
+```
+
+Usage:
+```bash
+curl -X POST "http://localhost:8000/fetch" \
+     -H "x-api-key: your-secret-key" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example.com"}'
+```
+
+### 4. Monitoring & Observability
+
+**Log rotation** (automatically configured):
+- Logs stored in `storage/scraper.log`
+- Max 5MB per file, keeps 5 backups
+- Check for errors: `tail -f storage/scraper.log | grep ERROR`
+
+**Database queries for analytics:**
+```bash
+sqlite3 storage/jobs.db "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
+```
+
+**Health check monitoring:**
+```bash
+while true; do
+  curl http://localhost:8000/health | jq .
+  sleep 30
+done
+```
+
 ## Performance & Monitoring
 
 ### Logging
