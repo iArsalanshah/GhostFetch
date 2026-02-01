@@ -5,25 +5,40 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 ## Features
 - **Stealth Browsing**: Uses Playwright with custom flags and user-agent rotation to mimic human users.
 - **Markdown Output**: Automatically converts HTML to Markdown for easy consumption by LLMs.
+- **Metadata Extraction**: Automatically extracts title, author, publish date, and images.
 - **X.com Support**: Logic to wait for dynamic content on Twitter/X.
-- **Dual Mode**: Can be used as a CLI tool or a REST API service.
+- **Async Job Queue**: Process multiple requests concurrently with intelligent retry logic.
+- **Persistent Sessions**: Cookie/localStorage persistence per domain reduces detection risk.
+- **Webhook Callbacks**: Get notified via HTTP when jobs complete.
+- **GitHub Integration**: Post results directly to GitHub issues.
+- **Dual Mode**: CLI tool or REST API service.
+- **Docker Ready**: Pre-configured Docker setup with docker-compose.
 
 ## Project Structure
 
 ```
-stealth-fetcher/
-├── main.py           # FastAPI service entry point
-├── scraper.py        # Core scraping logic and CLI implementation
-├── requirements.txt  # Python dependencies
-├── LICENSE           # MIT License
-└── README.md         # This documentation
+GhostFetch/
+├── main.py              # FastAPI service entry point
+├── scraper.py           # Core scraping logic and CLI implementation
+├── job_manager.py       # Async job queue and worker pool
+├── config.py            # Configuration management (env variables)
+├── Dockerfile           # Docker image definition
+├── docker-compose.yml   # Docker Compose configuration
+├── load_test.py         # Load testing script
+├── load_test.sh         # Load testing shell script
+├── requirements.txt     # Python dependencies
+├── storage/             # Persistent storage (cookies, logs, database)
+├── LICENSE              # MIT License
+└── README.md            # This documentation
 ```
 
 ## Installation
 
+### Option 1: Local Setup
+
 1.  **Clone/Navigate** to the directory:
     ```bash
-    cd stealth-fetcher
+    cd GhostFetch
     ```
 
 2.  **Install Dependencies**:
@@ -39,13 +54,39 @@ stealth-fetcher/
     playwright install chromium
     ```
 
+### Option 2: Docker (Recommended for Production)
+
+```bash
+docker-compose up
+```
+
+This will:
+- Build the Docker image
+- Start the GhostFetch API on port 8000
+- Mount a `storage` volume for persistence
+- Automatically restart on failure
+
 ## Usage
 
 ### 1. CLI Mode (Direct Fetch)
-Use calls this tool directly from the command line to fetch a page.
+Use this tool directly from the command line to fetch a page.
 
 ```bash
 python scraper.py "https://x.com/mrnacknack/status/2016134416897360212"
+```
+
+Output:
+```
+--- Metadata ---
+{
+  "title": "...",
+  "author": "...",
+  "publish_date": "...",
+  "images": [...]
+}
+
+--- Markdown ---
+[converted markdown content]
 ```
 
 ### 2. API Mode (Service for Agents)
@@ -56,44 +97,242 @@ python main.py
 ```
 The server will start at `http://localhost:8000`.
 
-**API Endpoint:**
-- **POST** `/fetch`
-- **Body**: `{"url": "https://example.com"}`
+## API Endpoints
 
-**Example Request:**
+### Submit a Fetch Job
+- **POST** `/fetch` (returns `202 Accepted`)
+- **Body**: 
+  ```json
+  {
+    "url": "https://example.com",
+    "callback_url": "https://your-server.com/webhook",  // Optional
+    "github_issue": 123                                  // Optional
+  }
+  ```
+
+**Example:**
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
      -d '{"url": "https://x.com/mrnacknack/status/2016134416897360212"}'
 ```
 
-## Integration with AI Agents
-Your agent can simply make an HTTP POST request to the API server when it encounters a blocked URL.
+**Response:**
+```json
+{
+  "job_id": "a1b2c3d4-e5f6-7890",
+  "url": "https://x.com/mrnacknack/status/2016134416897360212",
+  "status": "queued"
+}
+```
 
+### Check Job Status
+- **GET** `/job/{job_id}`
+
+**Example:**
+```bash
+curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
+```
+
+**Response (Completed):**
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890",
+  "url": "https://x.com/mrnacknack/status/2016134416897360212",
+  "status": "completed",
+  "result": {
+    "metadata": {
+      "title": "...",
+      "author": "...",
+      "publish_date": "...",
+      "images": [...]
+    },
+    "markdown": "..."
+  },
+  "created_at": 1706000000,
+  "started_at": 1706000001,
+  "completed_at": 1706000010
+}
+```
+
+### Health Check
+- **GET** `/health`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "browser_connected": true,
+  "active_jobs_queue": 2,
+  "active_browser_contexts": 1,
+  "concurrency_limit": 2
+}
+```
+
+## Integration Examples
+
+### Python Agent with Job Polling
+```python
+import requests
+import time
+
+def fetch_content_async(url):
+    # Submit job
+    response = requests.post(
+        "http://localhost:8000/fetch",
+        json={"url": url}
+    )
+    job_id = response.json()["job_id"]
+    
+    # Poll until completed
+    while True:
+        job_response = requests.get(f"http://localhost:8000/job/{job_id}")
+        job = job_response.json()
+        
+        if job["status"] == "completed":
+            return job["result"]["markdown"]
+        elif job["status"] == "failed":
+            raise Exception(f"Job failed: {job['error']}")
+        
+        time.sleep(1)  # Poll every second
+```
+
+### Using Webhook Callbacks
 ```python
 import requests
 
+# Your webhook endpoint receives:
+# POST to callback_url with:
+# {
+#   "job_id": "...",
+#   "url": "...",
+#   "status": "completed",
+#   "data": {"metadata": {...}, "markdown": "..."},
+#   "error": null,
+#   "error_details": null
+# }
+
+requests.post(
+    "http://localhost:8000/fetch",
+    json={
+        "url": "https://example.com",
+        "callback_url": "https://your-server.com/webhooks/ghostfetch"
+    }
+)
+```
+
+### GitHub Integration
+When you include a `github_issue` parameter, GhostFetch will post results as comments:
+
+```python
+requests.post(
+    "http://localhost:8000/fetch",
+    json={
+        "url": "https://example.com",
+        "github_issue": 42  # Post result as comment on issue #42
+    }
+)
+```
+
+**Requires:**
+- GitHub CLI (`gh` command) installed
+- `GITHUB_TOKEN` environment variable set
+- `GITHUB_REPO` configured
+
+## Integration with AI Agents
+Your agent can submit a fetch job and poll for results:
+
+```python
+import requests
+import time
+
 def fetch_blocked_content(url):
-    response = requests.post("http://localhost:8000/fetch", json={"url": url})
-    if response.status_code == 200:
-        return response.json()["markdown"]
-    else:
-        return "Error fetching content"
+    response = requests.post(
+        "http://localhost:8000/fetch",
+        json={"url": url}
+    )
+    job_id = response.json()["job_id"]
+    
+    # Poll for completion
+    max_retries = 60
+    for _ in range(max_retries):
+        result = requests.get(f"http://localhost:8000/job/{job_id}").json()
+        if result["status"] == "completed":
+            return result["result"]["markdown"]
+        elif result["status"] == "failed":
+            return f"Error: {result['error']}"
+        time.sleep(1)
+    
+    return "Timeout waiting for result"
 ```
 
 ## Configuration
 
-The `scraper.py` file contains a configurable list of user agents to rotate through. You can add more user agents to the `USER_AGENTS` list to further enhance stealth.
+Configuration is managed via environment variables (see `config.py`):
 
-```python
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...",
-    # Add more here
-]
+```bash
+# API Server
+GHOSTFETCH_HOST=0.0.0.0
+GHOSTFETCH_PORT=8000
+
+# Scraper Settings
+MAX_CONCURRENT_BROWSERS=2          # Number of concurrent browser contexts
+MIN_DOMAIN_DELAY=10                # Minimum seconds between requests to same domain
+MAX_REQUESTS_PER_BROWSER=50        # Restart browser after N requests
+MAX_RETRIES=3                      # Retry attempts for failed requests
+
+# GitHub Integration
+GITHUB_REPO=iArsalanshah/GhostFetch  # Owner/repo for issue comments
+
+# Persistence
+DATABASE_URL=sqlite:///./storage/jobs.db
+STORAGE_DIR=storage
+
+# Job Lifecycle
+JOB_TTL_SECONDS=86400              # Delete completed jobs after 24 hours
+```
+
+### Docker Environment
+Create a `.env` file for docker-compose:
+
+```bash
+MAX_CONCURRENT_BROWSERS=2
+MIN_DOMAIN_DELAY=10
+GITHUB_REPO=your-org/your-repo
+JOB_TTL_SECONDS=86400
+```
+
+Then run:
+```bash
+docker-compose --env-file .env up
 ```
 
 ## Specific Handling
 - **X/Twitter**: The scraper waits for `[data-testid="tweetText"]` to ensure the tweet content is loaded before capturing.
+
+## Performance & Monitoring
+
+### Logging
+Logs are written to `storage/scraper.log` with rotation (5MB max):
+- Stream output to console (INFO level)
+- File output with detailed format
+
+### Load Testing
+Run included load tests:
+
+```bash
+# Python async load test
+python load_test.py
+
+# Bash curl test (5 concurrent requests)
+bash load_test.sh
+```
+
+### Database
+Job history is stored in `storage/jobs.db` (SQLite):
+- Persistent across restarts
+- Automatic cleanup of old jobs (configurable TTL)
+- Query jobs directly for analytics/debugging
 
 ## Troubleshooting
 
@@ -104,7 +343,22 @@ playwright install chromium
 ```
 
 **Timeout Errors**
-If fetching times out, it might be due to slow network or heavy anti-bot protections. You can try increasing the timeout in `scraper.py` (default is 60000ms).
+If fetching times out, it might be due to slow network or heavy anti-bot protections. You can try:
+- Increasing timeout in `scraper.py` (default is 60000ms)
+- Increasing `MIN_DOMAIN_DELAY` to avoid rate-limiting
+
+**Job Stuck in "Processing"**
+Check logs in `storage/scraper.log` for errors. If stuck, restart the service.
+
+**GitHub Comments Not Posting**
+Ensure:
+- `gh` CLI is installed: `brew install gh` (macOS) or `apt install gh` (Linux)
+- You're authenticated: `gh auth login`
+- `GITHUB_REPO` is set correctly
+- `GITHUB_TOKEN` is in your environment
+
+**High Memory Usage**
+Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
 
 ## License
 
