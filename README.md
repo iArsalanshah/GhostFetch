@@ -485,6 +485,21 @@ Ensure:
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
 
+
+## Legal Disclaimer
+
+GhostFetch is provided for educational and research purposes only. Users are solely responsible for ensuring their use complies with:
+1. The Terms of Service of target websites
+2. Applicable laws regarding data access and automation (including CFAA in the US)
+3. The robots.txt and scraping policies of target domains
+
+This tool should not be used to:
+- Scrape private or authenticated content without authorization
+- Circumvent security measures on sites where such circumvention violates applicable law
+- Violate the Terms of Service of social media platforms (including X/Twitter)
+
+The authors assume no liability for misuse of this software.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
