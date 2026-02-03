@@ -1,0 +1,28 @@
+{
+  "name": "ghost_fetch",
+  "description": "Fetch content from any URL using a stealthy headless browser. Bypasses anti-bot protections and returns clean markdown with metadata. Supports session persistence via context_id.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The URL of the page to fetch (e.g. an X.com post or a protected news article)."
+      },
+      "context_id": {
+        "type": "string",
+        "description": "Optional persistent session ID. Use this to maintain cookies and a consistent browser fingerprint across multiple requests to the same site (e.g. for multi-step search/navigation)."
+      },
+      "callback_url": {
+        "type": "string",
+        "description": "Optional URL to receive a POST webhook when the job is completed."
+      },
+      "github_issue": {
+        "type": "integer",
+        "description": "Optional GitHub issue number to post the results as a comment."
+      }
+    },
+    "required": [
+      "url"
+    ]
+  }
+}

@@ -1,8 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 import logging
+import json
+import asyncio
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from src.core.scraper import StealthScraper, logger
 from src.core.job_manager import JobManager
@@ -14,6 +18,7 @@ job_manager = JobManager(scraper)
 
 class FetchRequest(BaseModel):
     url: str
+    context_id: Optional[str] = None
     callback_url: Optional[str] = None
     github_issue: Optional[int] = None
 
@@ -35,14 +40,33 @@ async def shutdown_event():
 async def fetch_endpoint(request: FetchRequest):
     """
     Submit a fetch job. Returns a job ID immediately.
+    If context_id is provided, it will reuse/save cookies for that context.
     If callback_url is provided, result will be POSTed there upon completion.
     """
     try:
-        job_id = await job_manager.submit_job(request.url, request.callback_url, request.github_issue)
+        job_id = await job_manager.submit_job(
+            request.url, 
+            context_id=request.context_id,
+            callback_url=request.callback_url, 
+            github_issue=request.github_issue
+        )
         return {"job_id": job_id, "url": request.url, "status": "queued"}
     except Exception as e:
         logger.exception("Error submitting job")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/events")
+async def sse_endpoint(request: Request):
+    """
+    Server-Sent Events (SSE) endpoint for real-time job updates.
+    """
+    async def event_generator():
+        async for event in job_manager.subscribe():
+            if await request.is_disconnected():
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/job/{job_id}")
 async def get_job_status(job_id: str):
@@ -64,6 +88,10 @@ async def health_check():
         "active_browser_contexts": scraper.get_active_contexts_count(),
         "concurrency_limit": settings.MAX_CONCURRENT_BROWSERS
     }
+
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True)
