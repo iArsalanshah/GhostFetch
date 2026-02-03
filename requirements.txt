@@ -4,3 +4,4 @@ uvicorn
 beautifulsoup4
 html2text
 requests
+prometheus-client

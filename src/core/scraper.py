@@ -10,6 +10,7 @@ import html2text
 import os
 from src.utils.config import settings
 from src.core.stealth_utils import ProxyManager, FingerprintGenerator, RoundRobinStrategy, RandomStrategy
+from prometheus_client import Gauge, Histogram
 
 from logging.handlers import RotatingFileHandler
 import time
@@ -27,6 +28,11 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("GhostFetch")
+
+# Prometheus Metrics
+BROWSER_COUNT = Gauge("ghostfetch_active_browsers", "Number of currently active browser instances")
+SCRAPE_LATENCY = Histogram("ghostfetch_scrape_latency_seconds", "Time taken to fetch and parse content", ["domain"])
+PROXY_STATE = Gauge("ghostfetch_proxy_health", "Proxy health status (1=OK, 0=BAD)", ["proxy_url"])
 
 class ScraperError(Exception):
     def __init__(self, message, error_code, retryable=False):
@@ -76,16 +82,18 @@ class StealthScraper:
                     "--use-fake-device-for-media-stream",
                 ]
             )
+            BROWSER_COUNT.inc()
 
     async def stop(self):
         if self.browser:
             await self.browser.close()
             self.browser = None
+            BROWSER_COUNT.dec()
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
 
-    async def fetch(self, url: str):
+    async def fetch(self, url: str, context_id: Optional[str] = None):
         async with self.semaphore:
             async with self.restart_lock:
                 self.requests_count += 1
@@ -109,19 +117,24 @@ class StealthScraper:
 
             self.last_fetch[domain] = time.time()
             
-            storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
+            # Storage path: uses context_id if provided, otherwise domain-based
+            if context_id:
+                storage_path = os.path.join(settings.STORAGE_DIR, f"context_{context_id}.json")
+            else:
+                storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
             
-            # Session Coherence: Cache fingerprint per domain
-            if domain in self.domain_fingerprints:
-                fp, ts = self.domain_fingerprints[domain]
+            # Session Coherence: Cache fingerprint per context or domain
+            cache_key = context_id if context_id else domain
+            if cache_key in self.domain_fingerprints:
+                fp, ts = self.domain_fingerprints[cache_key]
                 if time.time() - ts < self.fingerprint_ttl:
                     fingerprint = fp
                 else:
                     fingerprint = FingerprintGenerator.generate()
-                    self.domain_fingerprints[domain] = (fingerprint, time.time())
+                    self.domain_fingerprints[cache_key] = (fingerprint, time.time())
             else:
                 fingerprint = FingerprintGenerator.generate()
-                self.domain_fingerprints[domain] = (fingerprint, time.time())
+                self.domain_fingerprints[cache_key] = (fingerprint, time.time())
             
             context_kwargs = {
                 "user_agent": fingerprint["user_agent"],
@@ -157,25 +170,35 @@ class StealthScraper:
                 try:
                     response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     if not response:
-                        if proxy_url: self.proxy_manager.mark_bad(proxy_url)
+                        if proxy_url:
+                            self.proxy_manager.mark_bad(proxy_url)
+                            PROXY_STATE.labels(proxy_url=proxy_url).set(0)
                         raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
                     
                     if response.status >= 400:
-                        if proxy_url: self.proxy_manager.mark_bad(proxy_url)
+                        if proxy_url:
+                            self.proxy_manager.mark_bad(proxy_url)
+                            PROXY_STATE.labels(proxy_url=proxy_url).set(0)
                         retryable = response.status in [408, 429, 500, 502, 503, 504]
                         raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
 
                     # Performance: Record latency and mark proxy as good
                     latency_ms = (time.time() - start_time) * 1000
+                    SCRAPE_LATENCY.labels(domain=domain).observe(time.time() - start_time)
                     if proxy_url:
                         self.proxy_manager.record_latency(proxy_url, latency_ms)
                         self.proxy_manager.mark_good(proxy_url)
+                        PROXY_STATE.labels(proxy_url=proxy_url).set(1)
 
                 except PlaywrightTimeoutError:
-                    if proxy_url: self.proxy_manager.mark_bad(proxy_url)
+                    if proxy_url:
+                        self.proxy_manager.mark_bad(proxy_url)
+                        PROXY_STATE.labels(proxy_url=proxy_url).set(0)
                     raise ScraperError(f"Timeout fetching {domain}", "timeout", retryable=True)
                 except Exception as e:
-                    if proxy_url: self.proxy_manager.mark_bad(proxy_url)
+                    if proxy_url:
+                        self.proxy_manager.mark_bad(proxy_url)
+                        PROXY_STATE.labels(proxy_url=proxy_url).set(0)
                     if isinstance(e, ScraperError):
                         raise e
                     raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)

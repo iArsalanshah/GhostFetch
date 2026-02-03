@@ -9,12 +9,20 @@ import logging
 from typing import Dict, Optional, List
 from pydantic import BaseModel
 from src.utils.config import settings
+from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger("GhostFetch.JobManager")
+
+# Prometheus Metrics
+JOBS_TOTAL = Counter("ghostfetch_jobs_total", "Total number of jobs processed", ["status"])
+JOB_DURATION = Histogram("ghostfetch_job_duration_seconds", "Job processing duration in seconds")
+ACTIVE_WORKERS = Gauge("ghostfetch_active_workers", "Number of currently active worker tasks")
+QUEUE_SIZE = Gauge("ghostfetch_queue_size", "Current number of jobs in queue")
 
 class Job(BaseModel):
     id: str
     url: str
+    context_id: Optional[str] = None
     callback_url: Optional[str] = None
     github_issue: Optional[int] = None
     status: str = "queued"
@@ -30,6 +38,7 @@ class JobManager:
         self.scraper = scraper
         self.queue = asyncio.Queue()
         self.workers = []
+        self.subscribers: List[asyncio.Queue] = []
         self._init_db()
 
     def _init_db(self):
@@ -40,6 +49,7 @@ class JobManager:
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
                     url TEXT,
+                    context_id TEXT,
                     callback_url TEXT,
                     github_issue INTEGER,
                     status TEXT,
@@ -56,15 +66,29 @@ class JobManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs 
-                (id, url, callback_url, github_issue, status, result, error, error_details, created_at, started_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, url, context_id, callback_url, github_issue, status, result, error, error_details, created_at, started_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                job.id, job.url, job.callback_url, job.github_issue, job.status,
+                job.id, job.url, job.context_id, job.callback_url, job.github_issue, job.status,
                 json.dumps(job.result) if job.result else None,
                 job.error,
                 json.dumps(job.error_details) if job.error_details else None,
                 job.created_at, job.started_at, job.completed_at
             ))
+        self._broadcast({"type": "job_update", "job_id": job.id, "status": job.status})
+
+    def _broadcast(self, data: dict):
+        for q in self.subscribers:
+            q.put_nowait(data)
+
+    async def subscribe(self):
+        q = asyncio.Queue()
+        self.subscribers.append(q)
+        try:
+            while True:
+                yield await q.get()
+        finally:
+            self.subscribers.remove(q)
 
     def _get_job_from_db(self, job_id: str) -> Optional[Job]:
         with sqlite3.connect(self.db_path) as conn:
@@ -90,9 +114,9 @@ class JobManager:
         await asyncio.gather(*self.workers, return_exceptions=True)
         logger.info("Stopped workers.")
 
-    async def submit_job(self, url: str, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
+    async def submit_job(self, url: str, context_id: Optional[str] = None, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
         job_id = str(uuid.uuid4())
-        job = Job(id=job_id, url=url, callback_url=callback_url, github_issue=github_issue, created_at=time.time())
+        job = Job(id=job_id, url=url, context_id=context_id, callback_url=callback_url, github_issue=github_issue, created_at=time.time())
         self._save_job(job)
         await self.queue.put(job_id)
         logger.info(f"Job {job_id} submitted for {url}")
@@ -102,7 +126,9 @@ class JobManager:
         return self._get_job_from_db(job_id)
 
     async def _worker(self):
+        ACTIVE_WORKERS.inc()
         while True:
+            QUEUE_SIZE.set(self.queue.qsize())
             job_id = await self.queue.get()
             job = self.get_job(job_id)
             if not job:
@@ -118,11 +144,15 @@ class JobManager:
                 try:
                     from src.core.scraper import ScraperError
                     logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
-                    result = await self.scraper.fetch(job.url)
+                    
+                    with JOB_DURATION.time():
+                        result = await self.scraper.fetch(job.url, context_id=job.context_id)
+                    
                     job.result = result
                     job.status = "completed"
                     job.error = None
                     job.error_details = None
+                    JOBS_TOTAL.labels(status="completed").inc()
                     break
                 except ScraperError as e:
                     logger.error(f"Scraper error for job {job_id}: {e.message}")
@@ -137,17 +167,20 @@ class JobManager:
                         await asyncio.sleep(delay)
                     else:
                         job.status = "failed"
+                        JOBS_TOTAL.labels(status="failed").inc()
                         break
                 except Exception as e:
                     logger.exception(f"Fatal error for job {job_id}")
                     job.error = str(e)
                     job.error_details = {"code": "internal_error", "retryable": False}
                     job.status = "failed"
+                    JOBS_TOTAL.labels(status="failed").inc()
                     break
             
             job.completed_at = time.time()
             self._save_job(job)
             self.queue.task_done()
+            QUEUE_SIZE.set(self.queue.qsize())
             
             if job.callback_url:
                 asyncio.create_task(self._send_callback_async(job))
