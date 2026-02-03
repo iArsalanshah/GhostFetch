@@ -3,7 +3,8 @@
 A stealthy headless browser service for AI agents. Bypasses anti-bot protections to fetch content from sites like X.com and converts it to clean Markdown.
 
 ## Features
-- **Stealth Browsing**: Uses Playwright with custom flags and user-agent rotation to mimic human users.
+- **Ghost Protocol (Phase 2)**: Advanced proxy rotation and cohesive browser fingerprinting (User-Agents, viewports, hardware metrics).
+- **Stealth Browsing**: Uses Playwright with custom flags and canvas noise injection to mimic human users.
 - **Markdown Output**: Automatically converts HTML to Markdown for easy consumption by LLMs.
 - **Metadata Extraction**: Automatically extracts title, author, publish date, and images.
 - **X.com Support**: Logic to wait for dynamic content on Twitter/X.
@@ -19,13 +20,13 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 ```
 GhostFetch/
 ├── main.py              # FastAPI service entry point
-├── scraper.py           # Core scraping logic and CLI implementation
-├── job_manager.py       # Async job queue and worker pool
-├── config.py            # Configuration management (env variables)
+├── src/
+│   ├── api/             # API endpoint definitions
+│   ├── core/            # Scraper, Job Manager, Stealth Utils
+│   └── utils/           # Configuration and helpers
 ├── Dockerfile           # Docker image definition
 ├── docker-compose.yml   # Docker Compose configuration
-├── load_test.py         # Load testing script
-├── load_test.sh         # Load testing shell script
+├── scripts/             # Load testing and maintenance scripts
 ├── requirements.txt     # Python dependencies
 ├── storage/             # Persistent storage (cookies, logs, database)
 ├── LICENSE              # MIT License
@@ -72,7 +73,7 @@ This will:
 Use this tool directly from the command line to fetch a page.
 
 ```bash
-python scraper.py "https://x.com/mrnacknack/status/2016134416897360212"
+python -m src.core.scraper "https://x.com/mrnacknack/status/2016134416897360212"
 ```
 
 Output:
@@ -268,7 +269,12 @@ def fetch_blocked_content(url):
 
 ## Configuration
 
-Configuration is managed via environment variables (see `config.py`):
+GhostFetch is configured via environment variables (see `src/utils/config.py`) or the `proxies.txt` file.
+
+- **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
+- **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
+
+### Environment Variables
 
 ```bash
 # API Server
@@ -342,15 +348,8 @@ MAX_CONCURRENT_BROWSERS=4
 For serious stealth, rotate through residential proxies:
 
 ```python
-# Modify scraper.py to use proxies
-context = await browser.new_context(
-    proxy={
-        "server": "http://proxy-provider.com:8080",
-        "username": "user",
-        "password": "pass"
-    },
-    **context_kwargs
-)
+# Configure proxies.txt with your proxy list
+# GhostFetch will automatically rotate and track health.
 ```
 
 **Recommended proxy providers:**
@@ -447,10 +446,10 @@ Run included load tests:
 
 ```bash
 # Python async load test
-python load_test.py
+python scripts/load_test.py
 
 # Bash curl test (5 concurrent requests)
-bash load_test.sh
+bash scripts/load_test.sh
 ```
 
 ### Database
@@ -469,7 +468,7 @@ playwright install chromium
 
 **Timeout Errors**
 If fetching times out, it might be due to slow network or heavy anti-bot protections. You can try:
-- Increasing timeout in `scraper.py` (default is 60000ms)
+- Increasing timeout in `src/core/scraper.py` (default is 60000ms)
 - Increasing `MIN_DOMAIN_DELAY` to avoid rate-limiting
 
 **Job Stuck in "Processing"**

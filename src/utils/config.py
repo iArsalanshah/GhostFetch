@@ -21,4 +21,14 @@ class Settings:
     # Job Policy
     JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", 86400))  # 24 hours
 
+    # Proxy Settings
+    PROXIES_FILE = os.getenv("PROXIES_FILE", "proxies.txt")
+    PROXY_STRATEGY = os.getenv("PROXY_STRATEGY", "round_robin") # round_robin or random
+
+    def get_proxies(self):
+        if not os.path.exists(self.PROXIES_FILE):
+            return []
+        with open(self.PROXIES_FILE, "r") as f:
+            return [line.strip() for line in f if line.strip()]
+
 settings = Settings()
