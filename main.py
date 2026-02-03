@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from scraper import StealthScraper, logger
-from job_manager import JobManager
-from config import settings
 import uvicorn
+import logging
+
+from src.core.scraper import StealthScraper, logger
+from src.core.job_manager import JobManager
+from src.utils.config import settings
 
 app = FastAPI(title="Stealth Fetcher API", description="API for fetching content from hard-to-scrape sites.")
 scraper = StealthScraper() 

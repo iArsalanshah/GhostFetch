@@ -8,7 +8,8 @@ from playwright.async_api import async_playwright, Page, TimeoutError as Playwri
 from bs4 import BeautifulSoup
 import html2text
 import os
-from config import settings
+from src.utils.config import settings
+from src.core.stealth_utils import ProxyManager, FingerprintGenerator, RoundRobinStrategy, RandomStrategy
 
 from logging.handlers import RotatingFileHandler
 import time
@@ -34,13 +35,6 @@ class ScraperError(Exception):
         self.retryable = retryable
         super().__init__(self.message)
 
-# Common user agents to rotate
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-]
-
 class StealthScraper:
     def __init__(self):
         self.browser = None
@@ -49,6 +43,13 @@ class StealthScraper:
         self.restart_lock = asyncio.Lock()
         self.last_fetch = {} # {domain: timestamp}
         self.requests_count = 0
+        
+        # Initialize Proxy Manager
+        proxies = settings.get_proxies()
+        strategy = RandomStrategy() if settings.PROXY_STRATEGY == "random" else RoundRobinStrategy()
+        self.proxy_manager = ProxyManager(proxies, strategy)
+        if proxies:
+            logger.info(f"Loaded {len(proxies)} proxies with {settings.PROXY_STRATEGY} strategy.")
 
     async def start(self):
         if not self.playwright:
@@ -108,13 +109,22 @@ class StealthScraper:
             
             storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
             
+            # Generate dynamic fingerprint
+            fingerprint = FingerprintGenerator.generate()
+            
             context_kwargs = {
-                "user_agent": random.choice(USER_AGENTS),
-                "viewport": {"width": 1920, "height": 1080},
-                "locale": "en-US",
-                "timezone_id": "America/New_York",
+                "user_agent": fingerprint["user_agent"],
+                "viewport": fingerprint["viewport"],
+                "locale": fingerprint["locale"],
+                "timezone_id": fingerprint["timezone_id"],
                 "java_script_enabled": True,
             }
+
+            # Apply Proxy Rotation
+            proxy_url = self.proxy_manager.get_next_proxy()
+            if proxy_url:
+                logger.info(f"Using proxy: {proxy_url}")
+                context_kwargs["proxy"] = {"server": proxy_url}
 
             if os.path.exists(storage_path):
                 logger.debug(f"Loading session for {domain}...")
@@ -122,12 +132,8 @@ class StealthScraper:
 
             context = await self.browser.new_context(**context_kwargs)
 
-            # Basic stealth
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            """)
+            # Advanced Stealth Fingerprinting
+            await context.add_init_script(FingerprintGenerator.get_stealth_script(fingerprint))
 
             page = await context.new_page()
             content = ""
@@ -139,15 +145,22 @@ class StealthScraper:
                 try:
                     response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     if not response:
-                         raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
+                        if proxy_url: self.proxy_manager.mark_bad(proxy_url)
+                        raise ScraperError(f"No response from {domain}", "no_response", retryable=True)
                     
                     if response.status >= 400:
+                        if proxy_url: self.proxy_manager.mark_bad(proxy_url)
                         retryable = response.status in [408, 429, 500, 502, 503, 504]
                         raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
 
+                    # Mark proxy as good on success
+                    if proxy_url: self.proxy_manager.mark_good(proxy_url)
+
                 except PlaywrightTimeoutError:
+                    if proxy_url: self.proxy_manager.mark_bad(proxy_url)
                     raise ScraperError(f"Timeout fetching {domain}", "timeout", retryable=True)
                 except Exception as e:
+                    if proxy_url: self.proxy_manager.mark_bad(proxy_url)
                     if isinstance(e, ScraperError):
                         raise e
                     raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)

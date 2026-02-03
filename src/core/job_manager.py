@@ -8,7 +8,7 @@ import os
 import logging
 from typing import Dict, Optional, List
 from pydantic import BaseModel
-from config import settings
+from src.utils.config import settings
 
 logger = logging.getLogger("GhostFetch.JobManager")
 
@@ -114,11 +114,9 @@ class JobManager:
             self._save_job(job)
             
             attempt = 0
-            while attempt <= settings.MAX_REQUESTS_PER_BROWSER: # Note: This was max_retries in previous version, using settings.MAX_REQUESTS_PER_BROWSER as a stand-in or we can add MAX_RETRIES to config
-                # Actually let's add MAX_RETRIES to config in a moment. For now hardcode 3.
-                max_retries = 3
+            while attempt <= settings.MAX_RETRIES:
                 try:
-                    from scraper import ScraperError
+                    from src.core.scraper import ScraperError
                     logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
                     result = await self.scraper.fetch(job.url)
                     job.result = result
@@ -131,7 +129,7 @@ class JobManager:
                     job.error = e.message
                     job.error_details = {"code": e.error_code, "retryable": e.retryable}
                     
-                    if e.retryable and attempt < max_retries:
+                    if e.retryable and attempt < settings.MAX_RETRIES:
                         attempt += 1
                         import random
                         delay = (2 ** attempt) + random.uniform(0, 1)

@@ -3,10 +3,12 @@
 A stealthy headless browser service for AI agents. Bypasses anti-bot protections to fetch content from sites like X.com and converts it to clean Markdown.
 
 ## Features
-- **Stealth Browsing**: Uses Playwright with custom flags and user-agent rotation to mimic human users.
+- **Ghost Protocol (Phase 2)**: Advanced proxy rotation and cohesive browser fingerprinting (User-Agents, viewports, hardware metrics).
+- **Stealth Browsing**: Uses Playwright with custom flags and canvas noise injection to mimic human users.
 - **Markdown Output**: Automatically converts HTML to Markdown for easy consumption by LLMs.
 - **X.com Support**: Logic to wait for dynamic content on Twitter/X.
 - **Dual Mode**: Can be used as a CLI tool or a REST API service.
+- **Persistence**: Cookie persistence per domain to mimic returning users.
 
 ## Project Structure
 
@@ -83,14 +85,11 @@ def fetch_blocked_content(url):
 
 ## Configuration
 
-The `scraper.py` file contains a configurable list of user agents to rotate through. You can add more user agents to the `USER_AGENTS` list to further enhance stealth.
+GhostFetch can be configured via environment variables or the `proxies.txt` file.
 
-```python
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...",
-    # Add more here
-]
-```
+- **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
+- **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
+- **Delay**: Set `MIN_DOMAIN_DELAY` to control fetch frequency per domain.
 
 ## Specific Handling
 - **X/Twitter**: The scraper waits for `[data-testid="tweetText"]` to ensure the tweet content is loaded before capturing.
