@@ -3,6 +3,7 @@ import random
 import sys
 import logging
 import time
+from typing import Optional, Dict, List, Any
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
