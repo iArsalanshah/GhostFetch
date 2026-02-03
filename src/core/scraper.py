@@ -42,6 +42,8 @@ class StealthScraper:
         self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_BROWSERS)
         self.restart_lock = asyncio.Lock()
         self.last_fetch = {} # {domain: timestamp}
+        self.domain_fingerprints = {}  # {domain: (fingerprint, timestamp)}
+        self.fingerprint_ttl = 3600  # 1 hour coherence
         self.requests_count = 0
         
         # Initialize Proxy Manager
@@ -109,8 +111,17 @@ class StealthScraper:
             
             storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
             
-            # Generate dynamic fingerprint
-            fingerprint = FingerprintGenerator.generate()
+            # Session Coherence: Cache fingerprint per domain
+            if domain in self.domain_fingerprints:
+                fp, ts = self.domain_fingerprints[domain]
+                if time.time() - ts < self.fingerprint_ttl:
+                    fingerprint = fp
+                else:
+                    fingerprint = FingerprintGenerator.generate()
+                    self.domain_fingerprints[domain] = (fingerprint, time.time())
+            else:
+                fingerprint = FingerprintGenerator.generate()
+                self.domain_fingerprints[domain] = (fingerprint, time.time())
             
             context_kwargs = {
                 "user_agent": fingerprint["user_agent"],
@@ -137,6 +148,7 @@ class StealthScraper:
 
             page = await context.new_page()
             content = ""
+            start_time = time.time()
             try:
                 # Secure domain-only logging
                 logger.info(f"Fetching {domain}...")
@@ -153,8 +165,11 @@ class StealthScraper:
                         retryable = response.status in [408, 429, 500, 502, 503, 504]
                         raise ScraperError(f"HTTP {response.status} from {domain}", f"http_{response.status}", retryable=retryable)
 
-                    # Mark proxy as good on success
-                    if proxy_url: self.proxy_manager.mark_good(proxy_url)
+                    # Performance: Record latency and mark proxy as good
+                    latency_ms = (time.time() - start_time) * 1000
+                    if proxy_url:
+                        self.proxy_manager.record_latency(proxy_url, latency_ms)
+                        self.proxy_manager.mark_good(proxy_url)
 
                 except PlaywrightTimeoutError:
                     if proxy_url: self.proxy_manager.mark_bad(proxy_url)

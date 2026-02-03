@@ -27,13 +27,27 @@ class RandomStrategy(ProxyStrategy):
             return None
         return random.choice(proxies)
 
+from urllib.parse import urlparse
+
 class ProxyManager:
-    """Manages proxy rotation and health tracking."""
+    """Manages proxy rotation, health tracking, and latency profiling."""
     def __init__(self, proxies: List[str], strategy: ProxyStrategy = RoundRobinStrategy()):
-        self.proxies = proxies
+        self.proxies = [p for p in proxies if self._validate_proxy(p)]
+        if len(self.proxies) < len(proxies):
+            logger.warning(f"Removed {len(proxies) - len(self.proxies)} invalid proxies from the pool.")
+        
         self.strategy = strategy
         self.bad_proxies = set()
         self.proxy_failures = {} # {proxy_url: count}
+        self.proxy_latency = {}  # {proxy_url: [latency_ms, ...]}
+
+    def _validate_proxy(self, proxy_url: str) -> bool:
+        """Validate proxy URL format"""
+        try:
+            result = urlparse(proxy_url)
+            return result.scheme in ['http', 'https'] and result.netloc
+        except:
+            return False
 
     def get_next_proxy(self) -> Optional[str]:
         # Filter out bad proxies
@@ -45,7 +59,18 @@ class ProxyManager:
                 available_proxies = self.proxies
             else:
                 return None
+        
+        # Performance Enhancement: Prefer low-latency proxies if using strategy that allows it
+        # For now, we still rely on the strategy but could wrap it to sort by latency
         return self.strategy.get_proxy(available_proxies)
+
+    def record_latency(self, proxy_url: str, latency_ms: float):
+        if proxy_url not in self.proxy_latency:
+            self.proxy_latency[proxy_url] = []
+        self.proxy_latency[proxy_url].append(latency_ms)
+        # Keep last 10 measurements
+        if len(self.proxy_latency[proxy_url]) > 10:
+            self.proxy_latency[proxy_url].pop(0)
 
     def mark_bad(self, proxy_url: str):
         if not proxy_url:
