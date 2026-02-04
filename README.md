@@ -3,59 +3,74 @@
 A stealthy headless browser service for AI agents. Bypasses anti-bot protections to fetch content from sites like X.com and converts it to clean Markdown.
 
 ## Features
-- **Ghost Protocol (Phase 2)**: Advanced proxy rotation and cohesive browser fingerprinting (User-Agents, viewports, hardware metrics).
-- **Stealth Browsing**: Uses Playwright with custom flags and canvas noise injection to mimic human users.
-- **Markdown Output**: Automatically converts HTML to Markdown for easy consumption by LLMs.
-- **Metadata Extraction**: Automatically extracts title, author, publish date, and images.
-- **X.com Support**: Logic to wait for dynamic content on Twitter/X.
-- **Async Job Queue**: Process multiple requests concurrently with intelligent retry logic.
-- **Persistent Sessions**: Cookie/localStorage persistence per domain reduces detection risk.
-- **Webhook Callbacks**: Get notified via HTTP when jobs complete.
-- **GitHub Integration**: Post results directly to GitHub issues.
-- **Dual Mode**: CLI tool or REST API service.
-- **Docker Ready**: Pre-configured Docker setup with docker-compose.
+- **Zero Setup**: Install with pip, browsers auto-install on first run
+- **Synchronous API**: Single request returns content directly (no polling needed)
+- **Ghost Protocol**: Advanced proxy rotation and cohesive browser fingerprinting
+- **Stealth Browsing**: Uses Playwright with custom flags and canvas noise injection
+- **Markdown Output**: Automatically converts HTML to Markdown for easy LLM consumption
+- **Metadata Extraction**: Automatically extracts title, author, publish date, and images
+- **X.com Support**: Logic to wait for dynamic content on Twitter/X
+- **Async Job Queue**: Process multiple requests concurrently with intelligent retry
+- **Persistent Sessions**: Cookie/localStorage persistence per domain
+- **Webhook Callbacks**: Get notified via HTTP when jobs complete
+- **GitHub Integration**: Post results directly to GitHub issues
+- **Dual Mode**: CLI tool or REST API service
+- **Docker Ready**: Pre-configured Docker setup with docker-compose
 
-## Project Structure
+## Quick Start
 
+### For AI Agents (Simplest)
+
+```bash
+# Install from source
+pip install -e .
+
+# Fetch any URL (auto-installs browsers on first run)
+ghostfetch "https://x.com/user/status/123"
+
+# Or use the Python SDK
+python -c "from ghostfetch import fetch; print(fetch('https://example.com')['markdown'])"
 ```
-GhostFetch/
-├── main.py              # FastAPI service entry point
-├── src/
-│   ├── api/             # API endpoint definitions
-│   ├── core/            # Scraper, Job Manager, Stealth Utils
-│   └── utils/           # Configuration and helpers
-├── Dockerfile           # Docker image definition
-├── docker-compose.yml   # Docker Compose configuration
-├── scripts/             # Load testing and maintenance scripts
-├── requirements.txt     # Python dependencies
-├── storage/             # Persistent storage (cookies, logs, database)
-├── LICENSE              # MIT License
-└── README.md            # This documentation
+
+### For API Usage
+
+```bash
+# Start the server
+ghostfetch serve
+
+# Fetch synchronously (blocks until done)
+curl "http://localhost:8000/fetch/sync?url=https://example.com"
 ```
 
 ## Installation
 
-### Option 1: Local Setup
+### Option 1: pip install (Recommended)
 
-1.  **Clone/Navigate** to the directory:
-    ```bash
-    cd GhostFetch
-    ```
+```bash
+# Clone & install
+git clone https://github.com/iArsalanshah/GhostFetch.git
+cd GhostFetch
+pip install -e .
 
-2.  **Install Dependencies**:
-    ```bash
-    # Create a virtual environment (optional but recommended)
-    python3 -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Browsers install automatically on first use, or run:
+ghostfetch setup
+```
 
-    # Install python packages
-    pip install -r requirements.txt
+### Option 2: Manual Setup
 
-    # Install browser binaries
-    playwright install chromium
-    ```
+```bash
+cd GhostFetch
 
-### Option 2: Docker (Recommended for Production)
+# Create virtual environment (optional)
+python3 -m venv venv
+source venv/bin/activate
+
+# Install packages & browser
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### Option 3: Docker (Production)
 
 ```bash
 docker-compose up
@@ -69,11 +84,27 @@ This will:
 
 ## Usage
 
-### 1. CLI Mode (Direct Fetch)
-Use this tool directly from the command line to fetch a page.
+### 1. CLI Mode (Zero Setup)
+
+Using the `ghostfetch` CLI (after pip install):
 
 ```bash
-python -m src.core.scraper "https://x.com/mrnacknack/status/2016134416897360212"
+# Basic fetch
+ghostfetch "https://x.com/user/status/123"
+
+# JSON output (for parsing)
+ghostfetch "https://example.com" --json
+
+# Metadata only
+ghostfetch "https://example.com" --metadata-only
+
+# Quiet mode (no progress messages)
+ghostfetch "https://example.com" --quiet
+```
+
+Using the legacy module directly:
+```bash
+python -m src.core.scraper "https://x.com/user/status/123"
 ```
 
 Output:
@@ -91,23 +122,56 @@ Output:
 ```
 
 ### 2. API Mode (Service for Agents)
-Run the server to expose a fetching endpoint for other agents.
 
+Start the server:
 ```bash
+# Using CLI
+ghostfetch serve
+
+# Or directly
 python main.py
 ```
 The server will start at `http://localhost:8000`.
 
 ## API Endpoints
 
-### Submit a Fetch Job
+### Synchronous Fetch (Recommended for AI Agents)
+- **POST** `/fetch/sync` — blocks until content is ready
+- **GET** `/fetch/sync?url=...` — same, but via query parameter
+
+**Example (POST):**
+```bash
+curl -X POST "http://localhost:8000/fetch/sync" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example.com", "timeout": 60}'
+```
+
+**Example (GET):**
+```bash
+curl "http://localhost:8000/fetch/sync?url=https://example.com"
+```
+
+**Response:**
+```json
+{
+  "metadata": {
+    "title": "Example Domain",
+    "author": "",
+    "publish_date": "",
+    "images": []
+  },
+  "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples..."
+}
+```
+
+### Async Fetch (For Background Processing)
 - **POST** `/fetch` (returns `202 Accepted`)
 - **Body**: 
   ```json
   {
     "url": "https://example.com",
-    "callback_url": "https://your-server.com/webhook",  // Optional
-    "github_issue": 123                                  // Optional
+    "callback_url": "https://your-server.com/webhook",
+    "github_issue": 123
   }
   ```
 
@@ -115,14 +179,14 @@ The server will start at `http://localhost:8000`.
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
-     -d '{"url": "https://x.com/mrnacknack/status/2016134416897360212"}'
+     -d '{"url": "https://x.com/user/status/123"}'
 ```
 
 **Response:**
 ```json
 {
   "job_id": "a1b2c3d4-e5f6-7890",
-  "url": "https://x.com/mrnacknack/status/2016134416897360212",
+  "url": "https://x.com/user/status/123",
   "status": "queued"
 }
 ```
@@ -286,6 +350,10 @@ MAX_CONCURRENT_BROWSERS=2          # Number of concurrent browser contexts
 MIN_DOMAIN_DELAY=10                # Minimum seconds between requests to same domain
 MAX_REQUESTS_PER_BROWSER=50        # Restart browser after N requests
 MAX_RETRIES=3                      # Retry attempts for failed requests
+
+# Sync Endpoint Settings
+SYNC_TIMEOUT_DEFAULT=120           # Default timeout for /fetch/sync (seconds)
+MAX_SYNC_TIMEOUT=300               # Maximum allowed timeout (5 minutes)
 
 # GitHub Integration
 GITHUB_REPO=iArsalanshah/GhostFetch  # Owner/repo for issue comments

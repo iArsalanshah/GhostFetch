@@ -21,6 +21,10 @@ class Settings:
     # Job Policy
     JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", 86400))  # 24 hours
 
+    # Sync Endpoint Settings
+    SYNC_TIMEOUT_DEFAULT = float(os.getenv("SYNC_TIMEOUT_DEFAULT", 120.0))  # Default timeout for /fetch/sync
+    MAX_SYNC_TIMEOUT = float(os.getenv("MAX_SYNC_TIMEOUT", 300.0))  # Maximum allowed timeout (5 minutes)
+
     # Proxy Settings
     PROXIES_FILE = os.getenv("PROXIES_FILE", "proxies.txt")
     PROXY_STRATEGY = os.getenv("PROXY_STRATEGY", "round_robin") # round_robin or random
