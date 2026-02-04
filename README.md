@@ -1,5 +1,9 @@
 # GhostFetch
 
+[![PyPI version](https://badge.fury.io/py/ghostfetch.svg)](https://pypi.org/project/ghostfetch/)
+[![Docker Hub](https://img.shields.io/docker/pulls/iarsalanshah/ghostfetch)](https://hub.docker.com/r/iarsalanshah/ghostfetch)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A stealthy headless browser service for AI agents. Bypasses anti-bot protections to fetch content from sites like X.com and converts it to clean Markdown.
 
 ## Features
@@ -22,8 +26,8 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 ### For AI Agents (Simplest)
 
 ```bash
-# Install from source
-pip install -e .
+# Install from PyPI
+pip install ghostfetch
 
 # Fetch any URL (auto-installs browsers on first run)
 ghostfetch "https://x.com/user/status/123"
@@ -57,7 +61,7 @@ docker-compose up
 ### Option 2: pip install
 
 ```bash
-# From PyPI (when published)
+# From PyPI
 pip install ghostfetch
 
 # Or from source
