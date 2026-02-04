@@ -28,3 +28,6 @@ wheels/
 
 # macOS
 .DS_Store
+
+# GhostFetch storage (cookies, logs, database)
+storage/

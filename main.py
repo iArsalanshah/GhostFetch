@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import uvicorn
 import logging
@@ -8,19 +8,35 @@ import json
 import asyncio
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-from src.core.scraper import StealthScraper, logger
+from src.core.scraper import StealthScraper, ScraperError, logger
 from src.core.job_manager import JobManager
 from src.utils.config import settings
 
-app = FastAPI(title="Stealth Fetcher API", description="API for fetching content from hard-to-scrape sites.")
+app = FastAPI(
+    title="GhostFetch API", 
+    description="Stealthy headless browser API for AI agents. Fetches content from hard-to-scrape sites and converts to Markdown.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 scraper = StealthScraper() 
 job_manager = JobManager(scraper)
 
+
 class FetchRequest(BaseModel):
-    url: str
-    context_id: Optional[str] = None
-    callback_url: Optional[str] = None
-    github_issue: Optional[int] = None
+    """Request body for fetch endpoints."""
+    url: str = Field(..., description="The URL to fetch")
+    context_id: Optional[str] = Field(None, description="Context ID for session persistence (cookies/localStorage)")
+    callback_url: Optional[str] = Field(None, description="Webhook URL to receive results when job completes")
+    github_issue: Optional[int] = Field(None, description="GitHub issue number to post results as a comment")
+
+
+class SyncFetchRequest(BaseModel):
+    """Request body for synchronous fetch endpoint."""
+    url: str = Field(..., description="The URL to fetch")
+    context_id: Optional[str] = Field(None, description="Context ID for session persistence")
+    timeout: Optional[float] = Field(120.0, description="Maximum time to wait in seconds (default: 120)")
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -39,9 +55,12 @@ async def shutdown_event():
 @app.post("/fetch", status_code=202)
 async def fetch_endpoint(request: FetchRequest):
     """
-    Submit a fetch job. Returns a job ID immediately.
-    If context_id is provided, it will reuse/save cookies for that context.
-    If callback_url is provided, result will be POSTed there upon completion.
+    Submit a fetch job (async). Returns a job ID immediately.
+    
+    Use GET /job/{job_id} to poll for results, or provide a callback_url
+    to receive a webhook when the job completes.
+    
+    For synchronous fetching, use POST /fetch/sync instead.
     """
     try:
         job_id = await job_manager.submit_job(
@@ -54,6 +73,70 @@ async def fetch_endpoint(request: FetchRequest):
     except Exception as e:
         logger.exception("Error submitting job")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/fetch/sync", status_code=200)
+async def fetch_sync_endpoint(request: SyncFetchRequest):
+    """
+    Fetch a URL synchronously - blocks until content is ready.
+    
+    This is the easiest way for AI agents to fetch content:
+    one request in, structured content out.
+    
+    Returns:
+        - metadata: dict with title, author, publish_date, images
+        - markdown: string with the page content as markdown
+    
+    Example:
+        curl -X POST "http://localhost:8000/fetch/sync" \\
+             -H "Content-Type: application/json" \\
+             -d '{"url": "https://example.com"}'
+    """
+    timeout = request.timeout or 120.0
+    
+    try:
+        # Direct fetch with timeout
+        result = await asyncio.wait_for(
+            scraper.fetch(request.url, context_id=request.context_id),
+            timeout=timeout
+        )
+        
+        if not result:
+            raise HTTPException(
+                status_code=502, 
+                detail="No content could be fetched from the URL"
+            )
+        
+        return result
+        
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504, 
+            detail=f"Request timed out after {timeout} seconds"
+        )
+    except ScraperError as e:
+        status_code = 502 if e.retryable else 400
+        raise HTTPException(status_code=status_code, detail=e.message)
+    except Exception as e:
+        logger.exception("Error in sync fetch")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fetch/sync", status_code=200)
+async def fetch_sync_get_endpoint(
+    url: str = Query(..., description="The URL to fetch"),
+    context_id: Optional[str] = Query(None, description="Context ID for session persistence"),
+    timeout: float = Query(120.0, description="Maximum time to wait in seconds")
+):
+    """
+    Fetch a URL synchronously via GET request.
+    
+    Convenience endpoint for simple requests:
+        curl "http://localhost:8000/fetch/sync?url=https://example.com"
+    """
+    request = SyncFetchRequest(url=url, context_id=context_id, timeout=timeout)
+    return await fetch_sync_endpoint(request)
+
 
 @app.get("/events")
 async def sse_endpoint(request: Request):
