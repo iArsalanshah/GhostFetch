@@ -156,7 +156,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "ghostfetch",
-                        "version": "1.0.0"
+                        "version": "2026.2.4"
                     }
                 }
             
