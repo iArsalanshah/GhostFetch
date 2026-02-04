@@ -230,9 +230,26 @@ class MCPServer:
 
 async def main():
     """Main entry point for MCP server."""
+    import signal
+    
     server = MCPServer()
-    await server.run_stdio()
+    
+    # Handle shutdown signals gracefully
+    def handle_shutdown(signum, frame):
+        asyncio.create_task(server.cleanup())
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    
+    try:
+        await server.run_stdio()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await server.cleanup()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+

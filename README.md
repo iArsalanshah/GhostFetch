@@ -574,6 +574,35 @@ Ensure:
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
 
+## Publishing Setup
+
+### Docker Hub
+
+To enable automated Docker image publishing:
+
+1. Create a Docker Hub account and repository (`your-username/ghostfetch`)
+2. Generate an access token at https://hub.docker.com/settings/security
+3. Add these secrets to your GitHub repository:
+   - `DOCKERHUB_USERNAME`: Your Docker Hub username
+   - `DOCKERHUB_TOKEN`: Your access token
+
+Images will be published automatically on pushes to `main` and version tags.
+
+### PyPI (Trusted Publishing)
+
+To enable automated PyPI publishing:
+
+1. Go to https://pypi.org/manage/account/publishing/
+2. Add a new pending publisher:
+   - **PyPI Project Name**: `ghostfetch`
+   - **Owner**: `iArsalanshah`
+   - **Repository**: `GhostFetch`
+   - **Workflow name**: `pypi-publish.yml`
+   - **Environment**: `pypi`
+3. Create a GitHub Release to trigger publishing
+
+No API tokens needed - uses OIDC trusted publishing.
+
 
 ## Legal Disclaimer
 
