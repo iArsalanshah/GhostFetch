@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+        "ghostfetch": {
+            "command": "python",
+            "args": [
+                "-m",
+                "ghostfetch.mcp_server"
+            ],
+            "env": {
+                "SYNC_TIMEOUT_DEFAULT": "120",
+                "MAX_SYNC_TIMEOUT": "300"
+            }
+        }
+    }
+}

@@ -44,10 +44,23 @@ curl "http://localhost:8000/fetch/sync?url=https://example.com"
 
 ## Installation
 
-### Option 1: pip install (Recommended)
+### Option 1: Docker Hub (Fastest)
 
 ```bash
-# Clone & install
+# Pull and run
+docker run -p 8000:8000 iarsalanshah/ghostfetch
+
+# Or with docker-compose
+docker-compose up
+```
+
+### Option 2: pip install
+
+```bash
+# From PyPI (when published)
+pip install ghostfetch
+
+# Or from source
 git clone https://github.com/iArsalanshah/GhostFetch.git
 cd GhostFetch
 pip install -e .
@@ -56,7 +69,7 @@ pip install -e .
 ghostfetch setup
 ```
 
-### Option 2: Manual Setup
+### Option 3: Manual Setup
 
 ```bash
 cd GhostFetch
@@ -69,18 +82,6 @@ source venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
 ```
-
-### Option 3: Docker (Production)
-
-```bash
-docker-compose up
-```
-
-This will:
-- Build the Docker image
-- Start the GhostFetch API on port 8000
-- Mount a `storage` volume for persistence
-- Automatically restart on failure
 
 ## Usage
 
@@ -502,6 +503,31 @@ while true; do
 done
 ```
 
+### 3. Model Context Protocol (MCP)
+
+GhostFetch includes an MCP server for integration with Claude Desktop and other MCP-aware agents.
+
+Configuration (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "ghostfetch": {
+      "command": "python",
+      "args": ["-m", "ghostfetch.mcp_server"],
+      "env": {
+        "SYNC_TIMEOUT_DEFAULT": "120"
+      }
+    }
+  }
+}
+```
+
+This exposes a `ghostfetch` tool to the agent:
+- `url`: The URL to fetch
+- `context_id`: Optional session ID
+- `timeout`: Optional timeout (seconds)
+
 ## Performance & Monitoring
 
 ### Logging
@@ -511,13 +537,9 @@ Logs are written to `storage/scraper.log` with rotation (5MB max):
 
 ### Load Testing
 Run included load tests:
-
 ```bash
 # Python async load test
 python scripts/load_test.py
-
-# Bash curl test (5 concurrent requests)
-bash scripts/load_test.sh
 ```
 
 ### Database
@@ -551,6 +573,35 @@ Ensure:
 
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
+
+## Publishing Setup
+
+### Docker Hub
+
+To enable automated Docker image publishing:
+
+1. Create a Docker Hub account and repository (`your-username/ghostfetch`)
+2. Generate an access token at https://hub.docker.com/settings/security
+3. Add these secrets to your GitHub repository:
+   - `DOCKERHUB_USERNAME`: Your Docker Hub username
+   - `DOCKERHUB_TOKEN`: Your access token
+
+Images will be published automatically on pushes to `main` and version tags.
+
+### PyPI (Trusted Publishing)
+
+To enable automated PyPI publishing:
+
+1. Go to https://pypi.org/manage/account/publishing/
+2. Add a new pending publisher:
+   - **PyPI Project Name**: `ghostfetch`
+   - **Owner**: `iArsalanshah`
+   - **Repository**: `GhostFetch`
+   - **Workflow name**: `pypi-publish.yml`
+   - **Environment**: `pypi`
+3. Create a GitHub Release to trigger publishing
+
+No API tokens needed - uses OIDC trusted publishing.
 
 
 ## Legal Disclaimer

@@ -19,24 +19,6 @@ import os
 from typing import Optional
 
 
-def check_playwright_browsers() -> bool:
-    """Check if Playwright browsers are installed."""
-    try:
-        # Check if chromium executable exists
-        from playwright._impl._driver import compute_driver_executable
-        driver_path = compute_driver_executable()
-        # Check for browser in the expected location
-        browser_check = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--dry-run", "chromium"],
-            capture_output=True,
-            text=True
-        )
-        # If dry-run succeeds without suggesting install, browsers are ready
-        return "chromium" not in browser_check.stdout.lower() or browser_check.returncode == 0
-    except Exception:
-        return False
-
-
 def install_browsers(quiet: bool = False) -> bool:
     """Install Playwright browsers automatically."""
     try:
@@ -63,7 +45,7 @@ def install_browsers(quiet: bool = False) -> bool:
 
 def ensure_browsers_installed(quiet: bool = False) -> bool:
     """Ensure browsers are installed, installing if necessary."""
-    # Quick check: try importing and see if browser exists
+    # Try a quick browser launch to verify installation
     try:
         result = subprocess.run(
             [sys.executable, "-c", 
@@ -77,11 +59,15 @@ def ensure_browsers_installed(quiet: bool = False) -> bool:
         )
         if result.returncode == 0:
             return True
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print("⏳ Browser check timed out, attempting install...", file=sys.stderr)
     except Exception:
         pass
     
     # Browsers not ready, install them
     return install_browsers(quiet)
+
 
 
 async def fetch_url(url: str, output_format: str = "markdown") -> dict:
