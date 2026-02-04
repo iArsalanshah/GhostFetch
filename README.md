@@ -351,6 +351,10 @@ MIN_DOMAIN_DELAY=10                # Minimum seconds between requests to same do
 MAX_REQUESTS_PER_BROWSER=50        # Restart browser after N requests
 MAX_RETRIES=3                      # Retry attempts for failed requests
 
+# Sync Endpoint Settings
+SYNC_TIMEOUT_DEFAULT=120           # Default timeout for /fetch/sync (seconds)
+MAX_SYNC_TIMEOUT=300               # Maximum allowed timeout (5 minutes)
+
 # GitHub Integration
 GITHUB_REPO=iArsalanshah/GhostFetch  # Owner/repo for issue comments
 

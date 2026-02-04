@@ -35,7 +35,10 @@ class SyncFetchRequest(BaseModel):
     """Request body for synchronous fetch endpoint."""
     url: str = Field(..., description="The URL to fetch")
     context_id: Optional[str] = Field(None, description="Context ID for session persistence")
-    timeout: Optional[float] = Field(120.0, description="Maximum time to wait in seconds (default: 120)")
+    timeout: Optional[float] = Field(
+        None, 
+        description=f"Maximum time to wait in seconds (default: {settings.SYNC_TIMEOUT_DEFAULT}, max: {settings.MAX_SYNC_TIMEOUT})"
+    )
 
 
 @app.on_event("startup")
@@ -92,7 +95,9 @@ async def fetch_sync_endpoint(request: SyncFetchRequest):
              -H "Content-Type: application/json" \\
              -d '{"url": "https://example.com"}'
     """
-    timeout = request.timeout or 120.0
+    # Use default timeout if not specified, cap at max allowed
+    timeout = request.timeout if request.timeout is not None else settings.SYNC_TIMEOUT_DEFAULT
+    timeout = min(timeout, settings.MAX_SYNC_TIMEOUT)
     
     try:
         # Direct fetch with timeout
@@ -126,7 +131,10 @@ async def fetch_sync_endpoint(request: SyncFetchRequest):
 async def fetch_sync_get_endpoint(
     url: str = Query(..., description="The URL to fetch"),
     context_id: Optional[str] = Query(None, description="Context ID for session persistence"),
-    timeout: float = Query(120.0, description="Maximum time to wait in seconds")
+    timeout: Optional[float] = Query(
+        None, 
+        description=f"Maximum time to wait in seconds (default: {settings.SYNC_TIMEOUT_DEFAULT}, max: {settings.MAX_SYNC_TIMEOUT})"
+    )
 ):
     """
     Fetch a URL synchronously via GET request.
