@@ -22,6 +22,16 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 - **Dual Mode**: CLI tool or REST API service
 - **Docker Ready**: Pre-configured Docker setup with docker-compose
 
+## How It Works
+
+GhostFetch bridges the gap between AI agents and complex web content:
+
+1.  **Request**: You send a URL to the API (Sync or Async).
+2.  **Stealth Browser**: A headless Playwright instance initializes with "Ghost Protocol" (fingerprint masking, canvas noise, proxy rotation).
+3.  **Smart Interaction**: The browser navigates, waits for hydration, and intelligently scrolls to trigger lazy-loading (e.g., full Twitter threads).
+4.  **Extraction**: DOM is parsed and converted to clean, LLM-optimized Markdown.
+5.  **Response**: JSON result is returned or posted to a webhook/GitHub issue.
+
 ## Quick Start
 
 ### For AI Agents (Simplest)
@@ -338,6 +348,24 @@ def fetch_blocked_content(url):
 ```
 
 ## Configuration
+    
+### Project Structure
+
+```bash
+ghostfetch/
+├── ghostfetch/           # Core package
+│   ├── cli.py            # CLI entry point
+│   └── mcp_server.py     # MCP integration
+├── src/
+│   ├── core/
+│   │   └── scraper.py    # Main scraping logic
+│   └── utils/
+├── storage/              # Runtime data
+│   ├── jobs.db           # SQLite job history
+│   └── scraper.log       # Application logs
+├── docker-compose.yml
+└── pyproject.toml
+```
 
 GhostFetch is configured via environment variables (see `src/utils/config.py`) or the `proxies.txt` file.
 
@@ -626,7 +654,11 @@ This tool should not be used to:
 - Circumvent security measures on sites where such circumvention violates applicable law
 - Violate the Terms of Service of social media platforms (including X/Twitter)
 
-The authors assume no liability for misuse of this software.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iArsalanshah/GhostFetch&type=Date)](https://star-history.com/#iArsalanshah/GhostFetch&Date)
+
 
 ## License
 
