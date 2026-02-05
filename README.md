@@ -1,6 +1,6 @@
 # GhostFetch
 
-[![PyPI version](https://badge.fury.io/py/ghostfetch.svg)](https://pypi.org/project/ghostfetch/)
+[![PyPI version](https://img.shields.io/pypi/v/ghostfetch?color=blue)](https://pypi.org/project/ghostfetch/)
 [![Docker Hub](https://img.shields.io/docker/pulls/iarsalanshah/ghostfetch)](https://hub.docker.com/r/iarsalanshah/ghostfetch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

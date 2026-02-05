@@ -15,7 +15,7 @@ from src.utils.config import settings
 app = FastAPI(
     title="GhostFetch API", 
     description="Stealthy headless browser API for AI agents. Fetches content from hard-to-scrape sites and converts to Markdown.",
-    version="1.0.0",
+    version="2026.2.5",
     docs_url="/docs",
     redoc_url="/redoc"
 )
