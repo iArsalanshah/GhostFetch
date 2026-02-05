@@ -42,7 +42,6 @@ pip install ghostfetch
 
 # Fetch any URL (auto-installs browsers on first run)
 ghostfetch "https://x.com/user/status/123"
-
 # Or use the Python SDK
 python -c "from ghostfetch import fetch; print(fetch('https://example.com')['markdown'])"
 ```
@@ -274,7 +273,6 @@ GhostFetch is configured via environment variables (see `src/utils/config.py`) o
 - **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
 
 
-
 ### Environment Variables
 
 ```bash
@@ -449,12 +447,8 @@ If fetching times out, it might be due to slow network or heavy anti-bot protect
 **Job Stuck in "Processing"**
 Check logs in `storage/scraper.log` for errors. If stuck, restart the service.
 
-
-
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
-
-
 
 
 ## Legal Disclaimer
@@ -469,11 +463,9 @@ This tool should not be used to:
 - Circumvent security measures on sites where such circumvention violates applicable law
 - Violate the Terms of Service of social media platforms (including X/Twitter)
 
-
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=iArsalanshah/GhostFetch&type=Date)](https://star-history.com/#iArsalanshah/GhostFetch&Date)
-
 
 ## License
 
