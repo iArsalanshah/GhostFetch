@@ -387,7 +387,12 @@ docker-compose --env-file .env up
 ```
 
 ## Specific Handling
-- **X/Twitter**: The scraper waits for `[data-testid="tweetText"]` to ensure the tweet content is loaded before capturing.
+- **Universal Smart Scrolling**: The scraper intelligently detects page height changes and scrolls until no new content is loaded. This allows it to capture:
+    - Long X.com/Twitter threads
+    - Infinite scroll blogs/feeds
+    - Single Page Applications only rendering visible content
+    - Safety limits (50 scrolls) prevent infinite loops
+- **X/Twitter**: In addition to smart scrolling, the scraper specifically waits for `[data-testid="tweetText"]` to ensure the core tweet is present before starting the scroll.
 
 ## ⚠️ Important: Rate Limiting & Ethics
 
