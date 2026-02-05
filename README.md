@@ -273,6 +273,30 @@ GhostFetch is configured via environment variables (see `src/utils/config.py`) o
 - **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
 - **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
 
+### GitHub Integration
+
+GhostFetch can automatically post fetch results as comments on GitHub issues.
+
+**Usage:**
+Add the `github_issue` parameter to your request:
+
+```bash
+curl -X POST "http://localhost:8000/fetch" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "url": "https://example.com",
+           "github_issue": 42
+         }'
+```
+*Result will be posted as a comment on issue #42 of the configured repository.*
+
+**Requirements:**
+1.  **GitHub CLI (`gh`)**: Must be installed on the server.
+2.  **Authentication**: Run `gh auth login` on the server.
+3.  **Environment Variables**:
+    *   `GITHUB_REPO`: The `owner/repo` to post to (e.g., `iArsalanshah/GhostFetch`).
+    *   `GITHUB_TOKEN`: (Optional) Auth token if not logged in via CLI.
+
 ### Environment Variables
 
 ```bash
