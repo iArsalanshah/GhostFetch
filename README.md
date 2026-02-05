@@ -13,7 +13,8 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 - **Stealth Browsing**: Uses Playwright with custom flags and canvas noise injection
 - **Markdown Output**: Automatically converts HTML to Markdown for easy LLM consumption
 - **Metadata Extraction**: Automatically extracts title, author, publish date, and images
-- **X.com Support**: Logic to wait for dynamic content on Twitter/X
+- **Dynamic Smart Scrolling**: Automatically detects and scrolls infinite-feed pages until full content is loaded
+- **X.com Support**: Specific logic to wait for tweet content to render before scrolling
 - **Async Job Queue**: Process multiple requests concurrently with intelligent retry
 - **Persistent Sessions**: Cookie/localStorage persistence per domain
 - **Webhook Callbacks**: Get notified via HTTP when jobs complete
@@ -512,7 +513,7 @@ while true; do
 done
 ```
 
-### 3. Model Context Protocol (MCP)
+### 5. Model Context Protocol (MCP)
 
 GhostFetch includes an MCP server for integration with Claude Desktop and other MCP-aware agents.
 
