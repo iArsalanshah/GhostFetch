@@ -18,7 +18,7 @@ A stealthy headless browser service for AI agents. Bypasses anti-bot protections
 - **Async Job Queue**: Process multiple requests concurrently with intelligent retry
 - **Persistent Sessions**: Cookie/localStorage persistence per domain
 - **Webhook Callbacks**: Get notified via HTTP when jobs complete
-
+- **GitHub Integration**: Post results directly to GitHub issues
 - **Dual Mode**: CLI tool or REST API service
 - **Docker Ready**: Pre-configured Docker setup with docker-compose
 
@@ -272,6 +272,30 @@ GhostFetch is configured via environment variables (see `src/utils/config.py`) o
 - **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
 - **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
 
+### GitHub Integration
+
+GhostFetch can automatically post fetch results as comments on GitHub issues.
+
+**Usage:**
+Add the `github_issue` parameter to your request:
+
+```bash
+curl -X POST "http://localhost:8000/fetch" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "url": "https://example.com",
+           "github_issue": 42
+         }'
+```
+*Result will be posted as a comment on issue #42 of the configured repository.*
+
+**Requirements:**
+1.  **GitHub CLI (`gh`)**: Must be installed on the server.
+2.  **Authentication**: Run `gh auth login` on the server.
+3.  **Environment Variables**:
+    *   `GITHUB_REPO`: The `owner/repo` to post to (e.g., `iArsalanshah/GhostFetch`).
+    *   `GITHUB_TOKEN`: (Optional) Auth token if not logged in via CLI.
+
 
 ### Environment Variables
 
@@ -446,6 +470,13 @@ If fetching times out, it might be due to slow network or heavy anti-bot protect
 
 **Job Stuck in "Processing"**
 Check logs in `storage/scraper.log` for errors. If stuck, restart the service.
+
+**GitHub Comments Not Posting**
+Ensure:
+- `gh` CLI is installed: `brew install gh` (macOS) or `apt install gh` (Linux)
+- You're authenticated: `gh auth login`
+- `GITHUB_REPO` is set correctly
+- `GITHUB_TOKEN` is in your environment
 
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
