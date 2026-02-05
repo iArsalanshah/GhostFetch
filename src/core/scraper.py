@@ -207,15 +207,30 @@ class StealthScraper:
                 # Human-like jitter
                 await asyncio.sleep(random.uniform(1.5, 3.0))
 
-                # Specific handling for X.com / Twitter
+                # Specific handling for X.com / Twitter (selector wait only)
                 if "x.com" in url or "twitter.com" in url:
                     try:
-                        # Increased to 30s to handle X.com rate-limiting/slowness
                         await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
-                        await page.evaluate("window.scrollBy(0, 500)")
-                        await asyncio.sleep(2) 
                     except Exception:
                         logger.warning(f"Tweet selector timeout for {domain}")
+
+                # Dynamic smart scrolling for ALL sites
+                last_height = await page.evaluate("document.body.scrollHeight")
+                max_scrolls = 50  # Safety limit
+                stable_count = 0  # Require 2 consecutive stable heights
+
+                for _ in range(max_scrolls):
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(2)
+                    new_height = await page.evaluate("document.body.scrollHeight")
+                    
+                    if new_height == last_height:
+                        stable_count += 1
+                        if stable_count >= 2:  # Confirm end with 2 checks
+                            break
+                    else:
+                        stable_count = 0
+                        last_height = new_height
 
                 # Get rendered content
                 content = await page.content()
