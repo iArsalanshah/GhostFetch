@@ -117,12 +117,9 @@ ghostfetch "https://example.com" --metadata-only
 ghostfetch "https://example.com" --quiet
 ```
 
-Using the legacy module directly:
-```bash
-python -m src.core.scraper "https://x.com/user/status/123"
-```
+### 2. Output Format
 
-Output:
+By default, the CLI outputs:
 ```
 --- Metadata ---
 {
@@ -177,24 +174,6 @@ curl "http://localhost:8000/fetch/sync?url=https://example.com"
 }
 ```
 
-### Project Structure
-
-```bash
-ghostfetch/
-├── ghostfetch/           # Core package
-│   ├── cli.py            # CLI entry point
-│   └── mcp_server.py     # MCP integration
-├── src/
-│   ├── core/
-│   │   └── scraper.py    # Main scraping logic
-│   └── utils/
-├── storage/              # Runtime data
-│   ├── jobs.db           # SQLite job history
-│   └── scraper.log       # Application logs
-├── docker-compose.yml
-└── pyproject.toml
-```
-
 ### Async Fetch (For Background Processing)
 - **POST** `/fetch` (returns `202 Accepted`)
 - **Body**: 
@@ -234,7 +213,7 @@ curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890",
-  "url": "https://x.com/mrnacknack/status/2016134416897360212",
+  "url": "https://x.com/user/status/123",
   "status": "completed",
   "result": {
     "metadata": {
@@ -265,8 +244,26 @@ curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
 }
 ```
 
+## Project Structure
+
+```
+ghostfetch/
+├── ghostfetch/           # Core package
+│   ├── cli.py            # CLI entry point
+│   └── mcp_server.py     # MCP integration
+├── src/
+│   ├── core/
+│   │   └── scraper.py    # Main scraping logic
+│   └── utils/
+├── storage/              # Runtime data
+│   ├── jobs.db           # SQLite job history
+│   └── scraper.log       # Application logs
+├── docker-compose.yml
+└── pyproject.toml
+```
+
 ## Configuration
-    
+
 GhostFetch is configured via environment variables (see `src/utils/config.py`) or the `proxies.txt` file.
 
 - **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
@@ -432,20 +429,14 @@ Configuration (`claude_desktop_config.json`):
 
 This exposes a `ghostfetch` tool to the agent:
 - `url`: The URL to fetch
-- `context_id`: Optional session ID
-- `timeout`: Optional timeout (seconds)
+- `context_id`: Session ID (optional)
+- `timeout`: Timeout in seconds (optional)
 
 ## Performance & Monitoring
-
-### Logging
-Logs are written to `storage/scraper.log` with rotation (5MB max):
-- Stream output to console (INFO level)
-- File output with detailed format
 
 ### Load Testing
 Run included load tests:
 ```bash
-# Python async load test
 python scripts/load_test.py
 ```
 
