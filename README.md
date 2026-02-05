@@ -264,6 +264,7 @@ ghostfetch/
 
 ## Configuration
 
+
 GhostFetch is configured via environment variables (see `src/utils/config.py`) or the `proxies.txt` file.
 
 - **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
