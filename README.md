@@ -42,7 +42,6 @@ pip install ghostfetch
 
 # Fetch any URL (auto-installs browsers on first run)
 ghostfetch "https://x.com/user/status/123"
-
 # Or use the Python SDK
 python -c "from ghostfetch import fetch; print(fetch('https://example.com')['markdown'])"
 ```
@@ -98,9 +97,9 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## Usage
+## CLI Reference
 
-### 1. CLI Mode (Zero Setup)
+### 1. Basic Commands
 
 Using the `ghostfetch` CLI (after pip install):
 
@@ -137,15 +136,13 @@ Output:
 [converted markdown content]
 ```
 
-### 2. API Mode (Service for Agents)
+## API Reference
 
-Start the server:
+### Starting the Server
+
 ```bash
-# Using CLI
+# Start the server
 ghostfetch serve
-
-# Or directly
-python main.py
 ```
 The server will start at `http://localhost:8000`.
 
@@ -178,6 +175,24 @@ curl "http://localhost:8000/fetch/sync?url=https://example.com"
   },
   "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples..."
 }
+```
+
+### Project Structure
+
+```bash
+ghostfetch/
+├── ghostfetch/           # Core package
+│   ├── cli.py            # CLI entry point
+│   └── mcp_server.py     # MCP integration
+├── src/
+│   ├── core/
+│   │   └── scraper.py    # Main scraping logic
+│   └── utils/
+├── storage/              # Runtime data
+│   ├── jobs.db           # SQLite job history
+│   └── scraper.log       # Application logs
+├── docker-compose.yml
+└── pyproject.toml
 ```
 
 ### Async Fetch (For Background Processing)
@@ -250,127 +265,37 @@ curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
 }
 ```
 
-## Integration Examples
-
-### Python Agent with Job Polling
-```python
-import requests
-import time
-
-def fetch_content_async(url):
-    # Submit job
-    response = requests.post(
-        "http://localhost:8000/fetch",
-        json={"url": url}
-    )
-    job_id = response.json()["job_id"]
-    
-    # Poll until completed
-    while True:
-        job_response = requests.get(f"http://localhost:8000/job/{job_id}")
-        job = job_response.json()
-        
-        if job["status"] == "completed":
-            return job["result"]["markdown"]
-        elif job["status"] == "failed":
-            raise Exception(f"Job failed: {job['error']}")
-        
-        time.sleep(1)  # Poll every second
-```
-
-### Using Webhook Callbacks
-```python
-import requests
-
-# Your webhook endpoint receives:
-# POST to callback_url with:
-# {
-#   "job_id": "...",
-#   "url": "...",
-#   "status": "completed",
-#   "data": {"metadata": {...}, "markdown": "..."},
-#   "error": null,
-#   "error_details": null
-# }
-
-requests.post(
-    "http://localhost:8000/fetch",
-    json={
-        "url": "https://example.com",
-        "callback_url": "https://your-server.com/webhooks/ghostfetch"
-    }
-)
-```
-
-### GitHub Integration
-When you include a `github_issue` parameter, GhostFetch will post results as comments:
-
-```python
-requests.post(
-    "http://localhost:8000/fetch",
-    json={
-        "url": "https://example.com",
-        "github_issue": 42  # Post result as comment on issue #42
-    }
-)
-```
-
-**Requires:**
-- GitHub CLI (`gh` command) installed
-- `GITHUB_TOKEN` environment variable set
-- `GITHUB_REPO` configured
-
-## Integration with AI Agents
-Your agent can submit a fetch job and poll for results:
-
-```python
-import requests
-import time
-
-def fetch_blocked_content(url):
-    response = requests.post(
-        "http://localhost:8000/fetch",
-        json={"url": url}
-    )
-    job_id = response.json()["job_id"]
-    
-    # Poll for completion
-    max_retries = 60
-    for _ in range(max_retries):
-        result = requests.get(f"http://localhost:8000/job/{job_id}").json()
-        if result["status"] == "completed":
-            return result["result"]["markdown"]
-        elif result["status"] == "failed":
-            return f"Error: {result['error']}"
-        time.sleep(1)
-    
-    return "Timeout waiting for result"
-```
-
 ## Configuration
     
-### Project Structure
-
-```bash
-ghostfetch/
-├── ghostfetch/           # Core package
-│   ├── cli.py            # CLI entry point
-│   └── mcp_server.py     # MCP integration
-├── src/
-│   ├── core/
-│   │   └── scraper.py    # Main scraping logic
-│   └── utils/
-├── storage/              # Runtime data
-│   ├── jobs.db           # SQLite job history
-│   └── scraper.log       # Application logs
-├── docker-compose.yml
-└── pyproject.toml
-```
-
 GhostFetch is configured via environment variables (see `src/utils/config.py`) or the `proxies.txt` file.
 
 - **Proxies**: Add one proxy per line to `proxies.txt` in the format `http://user:pass@host:port`.
 - **Strategy**: Set `PROXY_STRATEGY` to `round_robin` or `random`.
+
+### GitHub Integration
+
+GhostFetch can automatically post fetch results as comments on GitHub issues.
+
+**Usage:**
+Add the `github_issue` parameter to your request:
+
+```bash
+curl -X POST "http://localhost:8000/fetch" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "url": "https://example.com",
+           "github_issue": 42
+         }'
+```
+*Result will be posted as a comment on issue #42 of the configured repository.*
+
+**Requirements:**
+1.  **GitHub CLI (`gh`)**: Must be installed on the server.
+2.  **Authentication**: Run `gh auth login` on the server.
+3.  **Environment Variables**:
+    *   `GITHUB_REPO`: The `owner/repo` to post to (e.g., `iArsalanshah/GhostFetch`).
+    *   `GITHUB_TOKEN`: (Optional) Auth token if not logged in via CLI.
+
 
 ### Environment Variables
 
@@ -465,63 +390,7 @@ For serious stealth, rotate through residential proxies:
 - Oxylabs (residential networks)
 - Local proxy rotation with tools like `scrapy-proxy-pool`
 
-### 2. Caching Layer (Reduce Redundant Requests)
-
-For repeated fetches, implement Redis caching:
-
-```python
-import redis
-
-cache = redis.Redis(host='localhost', port=6379)
-
-async def fetch_with_cache(url, ttl=3600):
-    cached = cache.get(url)
-    if cached:
-        return json.loads(cached)
-    
-    result = await scraper.fetch(url)
-    cache.setex(url, ttl, json.dumps(result))
-    return result
-```
-
-**Docker Compose with Redis:**
-```yaml
-services:
-  ghostfetch:
-    build: .
-    ports:
-      - "8000:8000"
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-```
-
-### 3. Security & Authentication
-
-Add API key authentication before exposing publicly:
-
-```python
-from fastapi import Header, HTTPException
-
-VALID_API_KEYS = set(os.getenv("API_KEYS", "").split(","))
-
-@app.post("/fetch")
-async def fetch_endpoint(request: FetchRequest, x_api_key: str = Header(None)):
-    if not x_api_key or x_api_key not in VALID_API_KEYS:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    # ... rest of endpoint
-```
-
-Usage:
-```bash
-curl -X POST "http://localhost:8000/fetch" \
-     -H "x-api-key: your-secret-key" \
-     -H "Content-Type: application/json" \
-     -d '{"url": "https://example.com"}'
-```
-
-### 4. Monitoring & Observability
+### 2. Monitoring & Observability
 
 **Log rotation** (automatically configured):
 - Logs stored in `storage/scraper.log`
@@ -541,7 +410,7 @@ while true; do
 done
 ```
 
-### 5. Model Context Protocol (MCP)
+## Model Context Protocol (MCP)
 
 GhostFetch includes an MCP server for integration with Claude Desktop and other MCP-aware agents.
 
@@ -612,35 +481,6 @@ Ensure:
 **High Memory Usage**
 Reduce `MAX_CONCURRENT_BROWSERS` or `MAX_REQUESTS_PER_BROWSER` in configuration.
 
-## Publishing Setup
-
-### Docker Hub
-
-To enable automated Docker image publishing:
-
-1. Create a Docker Hub account and repository (`your-username/ghostfetch`)
-2. Generate an access token at https://hub.docker.com/settings/security
-3. Add these secrets to your GitHub repository:
-   - `DOCKERHUB_USERNAME`: Your Docker Hub username
-   - `DOCKERHUB_TOKEN`: Your access token
-
-Images will be published automatically on pushes to `main` and version tags.
-
-### PyPI (Trusted Publishing)
-
-To enable automated PyPI publishing:
-
-1. Go to https://pypi.org/manage/account/publishing/
-2. Add a new pending publisher:
-   - **PyPI Project Name**: `ghostfetch`
-   - **Owner**: `iArsalanshah`
-   - **Repository**: `GhostFetch`
-   - **Workflow name**: `pypi-publish.yml`
-   - **Environment**: `pypi`
-3. Create a GitHub Release to trigger publishing
-
-No API tokens needed - uses OIDC trusted publishing.
-
 
 ## Legal Disclaimer
 
@@ -654,11 +494,9 @@ This tool should not be used to:
 - Circumvent security measures on sites where such circumvention violates applicable law
 - Violate the Terms of Service of social media platforms (including X/Twitter)
 
-
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=iArsalanshah/GhostFetch&type=Date)](https://star-history.com/#iArsalanshah/GhostFetch&Date)
-
 
 ## License
 
