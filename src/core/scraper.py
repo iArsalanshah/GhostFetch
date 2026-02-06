@@ -162,6 +162,39 @@ class StealthScraper:
 
             page = await context.new_page()
             content = ""
+            intercepted_data = []
+            intercept_tasks = set()
+            
+            # Network Interception (Unbrowse Strategy)
+            async def handle_response(response):
+                if response.request.resource_type in ["fetch", "xhr"]:
+                    try:
+                        content_type = response.headers.get("content-type", "")
+                        if "application/json" in content_type:
+                            url = response.url
+                            if "x.com" in url and ("graphql" in url or "api" in url):
+                                logger.info(f"Intercepting API call: {url}")
+                                
+                                # Create a task to fetch JSON so we can wait for it later
+                                async def get_json(res):
+                                    try:
+                                        data = await res.json()
+                                        intercepted_data.append({
+                                            "url": res.url,
+                                            "type": "json",
+                                            "data": data
+                                        })
+                                    except Exception as e:
+                                        logger.debug(f"Failed to parse JSON from {res.url}: {e}")
+
+                                task = asyncio.create_task(get_json(response))
+                                intercept_tasks.add(task)
+                                task.add_done_callback(intercept_tasks.discard)
+                    except Exception:
+                        pass
+
+            page.on("response", handle_response)
+            
             start_time = time.time()
             try:
                 # Secure domain-only logging
@@ -170,6 +203,17 @@ class StealthScraper:
                 # 60s timeout for page load
                 try:
                     response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    
+                    # Wait for high-value API calls to settle
+                    if "x.com" in url or "twitter.com" in url:
+                        # Give X.com time to fire its GraphQL calls
+                        await asyncio.sleep(3)
+                        
+                    # CRITICAL: Wait for all interception tasks to finish before closing
+                    if intercept_tasks:
+                        logger.info(f"Waiting for {len(intercept_tasks)} interception tasks...")
+                        await asyncio.wait(intercept_tasks, timeout=10)
+
                     if not response:
                         if proxy_url:
                             self.proxy_manager.mark_bad(proxy_url)
@@ -242,7 +286,9 @@ class StealthScraper:
                 await context.close()
 
             if content:
-                return self._parse_content(content)
+                result = self._parse_content(content)
+                result["intercepted_data"] = intercepted_data
+                return result
             return ""
 
     def _parse_content(self, html_content):
@@ -315,11 +361,36 @@ if __name__ == "__main__":
             result = await scraper.fetch(args.url)
             if result:
                 logger.info("Successfully fetched and parsed content.")
+                
+                # Check for intercepted data (Unbrowse Mode)
+                if result.get("intercepted_data"):
+                    print("\n--- Intercepted Data (Unbrowse) ---\n")
+                    for item in result["intercepted_data"]:
+                        url = item["url"]
+                        if "TweetResultByRestId" in url or "ThreadDetail" in url:
+                            print(f"Captured Tweet Data from: {url}")
+                            # Basic extraction of full_text for verification
+                            try:
+                                legacy = item["data"]["data"]["tweetResult"]["result"]["legacy"]
+                                print(f"\n[API FULL TEXT]\n{legacy.get('full_text')}\n")
+                            except:
+                                try:
+                                    # Fallback for some GraphQL structures
+                                    tweet = item["data"]["data"]["threaded_conversation_with_injections_v2"]["instructions"][0]["entries"][0]["content"]["itemContent"]["tweet_results"]["result"]["legacy"]
+                                    print(f"\n[API FULL TEXT]\n{tweet.get('full_text')}\n")
+                                except:
+                                    pass
+
                 print("\n--- Metadata ---\n")
                 import json
                 print(json.dumps(result["metadata"], indent=2))
-                print("\n--- Markdown ---\n")
-                print(result["markdown"])
+                print("\n--- Markdown (DOM) ---\n")
+                # Truncate long markdown for CLI visibility
+                md = result["markdown"]
+                if len(md) > 2000:
+                    print(md[:2000] + "\n... (truncated)")
+                else:
+                    print(md)
             else:
                 logger.error("No content fetched.")
         except Exception as e:
