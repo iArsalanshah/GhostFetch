@@ -56,6 +56,24 @@ This exposes a `ghostfetch` tool to the agent:
 
 ---
 
+## Stealth Strategies
+
+GhostFetch employs multiple layers of stealth to bypass anti-bot protections.
+
+### Universal Smart Scrolling
+The scraper implements a dynamic scrolling algorithm that waits for stable DOM height before finishing. This ensures that lazy-loaded content (images, comments, infinite feeds) is fully captured.
+
+### Unbrowse (Network Interception)
+**Unbrowse** is a specialized strategy for bypassing rigid UI-level blocks (like the X.com login wall). 
+
+Instead of relying solely on the rendered DOM, GhostFetch intercepts the background API (GraphQL/XHR) traffic. This allows it to capture the "truth" directly from the site's data feed, even if the front-end is displaying a blocking overlay or an error message.
+
+- **Optimized for X.com**: Automatically detects and extracts `full_text` from X's GraphQL endpoints.
+- **Data Capture**: Intercepted JSON data is included in the `intercepted_data` field of the fetch result.
+- **Usage**: Active by default for all fetches.
+
+---
+
 ## Production Deployment
 
 ### Docker Recommended Setup

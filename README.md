@@ -55,6 +55,7 @@ ghostfetch "https://x.com/user/status/123"
 *   **Ghost Protocol**: Advanced proxy rotation and cohesive browser fingerprinting.
 *   **Smart Scrolling**: Auto-detects and scrolls infinite feeds to capture full content.
 *   **X.com Optimized**: Special handling for Twitter/X hydration and thread expansion.
+*   **Unbrowse Strategy**: Stealthy network interception to capture raw data from background API calls (bypasses UI-level blocks like X's login wall).
 *   **Metadata Extraction**: Auto-extracts title, author, date, and images.
 *   **Job Queue**: Built-in async job system with webhooks and retries.
 *   **Persistent Sessions**: Cookie/localStorage persistence per domain.
