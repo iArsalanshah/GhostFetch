@@ -156,7 +156,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "ghostfetch",
-                        "version": "2026.2.6"
+                        "version": "2026.2.9"
                     }
                 }
             
@@ -252,4 +252,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

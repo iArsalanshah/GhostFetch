@@ -127,26 +127,34 @@ class JobManager:
 
     async def _worker(self):
         ACTIVE_WORKERS.inc()
-        while True:
-            QUEUE_SIZE.set(self.queue.qsize())
-            job_id = await self.queue.get()
-            job = self.get_job(job_id)
-            if not job:
-                self.queue.task_done()
-                continue
+        try:
+            while True:
+                QUEUE_SIZE.set(self.queue.qsize())
+                job_id = await self.queue.get()
+                job = self.get_job(job_id)
+                if not job:
+                    self.queue.task_done()
+                    continue
 
-            job.status = "processing"
-            job.started_at = time.time()
-            self._save_job(job)
-            
-            attempt = 0
-            while attempt <= settings.MAX_RETRIES:
-                try:
-                    from src.core.scraper import ScraperError
-                    logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
-                    
+                job.status = "processing"
+                job.started_at = time.time()
+                self._save_job(job)
+                
+                attempt = 0
+                while attempt <= settings.MAX_RETRIES:
+                    try:
+                        from src.core.scraper import ScraperError
+                        logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
+                        
                     with JOB_DURATION.time():
                         result = await self.scraper.fetch(job.url, context_id=job.context_id)
+
+                    if not result or not isinstance(result, dict):
+                        raise ScraperError(
+                            "No content could be fetched from the URL",
+                            "no_content",
+                            retryable=True,
+                        )
                     
                     job.result = result
                     job.status = "completed"
@@ -154,39 +162,41 @@ class JobManager:
                     job.error_details = None
                     JOBS_TOTAL.labels(status="completed").inc()
                     break
-                except ScraperError as e:
-                    logger.error(f"Scraper error for job {job_id}: {e.message}")
-                    job.error = e.message
-                    job.error_details = {"code": e.error_code, "retryable": e.retryable}
-                    
-                    if e.retryable and attempt < settings.MAX_RETRIES:
-                        attempt += 1
-                        import random
-                        delay = (2 ** attempt) + random.uniform(0, 1)
-                        logger.info(f"Retrying job {job_id} in {delay:.2f}s...")
-                        await asyncio.sleep(delay)
-                    else:
+                    except ScraperError as e:
+                        logger.error(f"Scraper error for job {job_id}: {e.message}")
+                        job.error = e.message
+                        job.error_details = {"code": e.error_code, "retryable": e.retryable}
+                        
+                        if e.retryable and attempt < settings.MAX_RETRIES:
+                            attempt += 1
+                            import random
+                            delay = (2 ** attempt) + random.uniform(0, 1)
+                            logger.info(f"Retrying job {job_id} in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
+                        else:
+                            job.status = "failed"
+                            JOBS_TOTAL.labels(status="failed").inc()
+                            break
+                    except Exception as e:
+                        logger.exception(f"Fatal error for job {job_id}")
+                        job.error = str(e)
+                        job.error_details = {"code": "internal_error", "retryable": False}
                         job.status = "failed"
                         JOBS_TOTAL.labels(status="failed").inc()
                         break
-                except Exception as e:
-                    logger.exception(f"Fatal error for job {job_id}")
-                    job.error = str(e)
-                    job.error_details = {"code": "internal_error", "retryable": False}
-                    job.status = "failed"
-                    JOBS_TOTAL.labels(status="failed").inc()
-                    break
-            
-            job.completed_at = time.time()
-            self._save_job(job)
-            self.queue.task_done()
-            QUEUE_SIZE.set(self.queue.qsize())
-            
-            if job.callback_url:
-                asyncio.create_task(self._send_callback_async(job))
-            
-            if job.github_issue:
-                asyncio.create_task(self._send_github_comment_async(job))
+                
+                job.completed_at = time.time()
+                self._save_job(job)
+                self.queue.task_done()
+                QUEUE_SIZE.set(self.queue.qsize())
+                
+                if job.callback_url:
+                    asyncio.create_task(self._send_callback_async(job))
+                
+                if job.github_issue:
+                    asyncio.create_task(self._send_github_comment_async(job))
+        finally:
+            ACTIVE_WORKERS.dec()
 
     async def _send_callback_async(self, job: Job):
         await asyncio.to_thread(self._send_callback, job)
@@ -214,7 +224,8 @@ class JobManager:
         try:
             repo = settings.GITHUB_REPO
             if job.status == "completed":
-                size_kb = len(job.result.get("markdown", "")) / 1024
+                markdown = job.result.get("markdown", "") if isinstance(job.result, dict) else ""
+                size_kb = len(markdown) / 1024
                 body = f"✅ **Done**: Extracted {size_kb:.1f}KB markdown for {job.url}"
             else:
                 retry_text = "(retryable)" if job.error_details and job.error_details.get("retryable") else "(fatal)"
