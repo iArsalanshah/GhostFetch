@@ -31,12 +31,12 @@ from urllib.parse import urlparse
 
 class ProxyManager:
     """Manages proxy rotation, health tracking, and latency profiling."""
-    def __init__(self, proxies: List[str], strategy: ProxyStrategy = RoundRobinStrategy()):
+    def __init__(self, proxies: List[str], strategy: Optional[ProxyStrategy] = None):
         self.proxies = [p for p in proxies if self._validate_proxy(p)]
         if len(self.proxies) < len(proxies):
             logger.warning(f"Removed {len(proxies) - len(self.proxies)} invalid proxies from the pool.")
         
-        self.strategy = strategy
+        self.strategy = strategy or RoundRobinStrategy()
         self.bad_proxies = set()
         self.proxy_failures = {} # {proxy_url: count}
         self.proxy_latency = {}  # {proxy_url: [latency_ms, ...]}
