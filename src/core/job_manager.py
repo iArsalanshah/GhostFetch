@@ -155,13 +155,13 @@ class JobManager:
                             "no_content",
                             retryable=True,
                         )
-                        
-                        job.result = result
-                        job.status = "completed"
-                        job.error = None
-                        job.error_details = None
-                        JOBS_TOTAL.labels(status="completed").inc()
-                        break
+                    
+                    job.result = result
+                    job.status = "completed"
+                    job.error = None
+                    job.error_details = None
+                    JOBS_TOTAL.labels(status="completed").inc()
+                    break
                     except ScraperError as e:
                         logger.error(f"Scraper error for job {job_id}: {e.message}")
                         job.error = e.message
