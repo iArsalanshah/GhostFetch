@@ -146,22 +146,22 @@ class JobManager:
                         from src.core.scraper import ScraperError
                         logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
                         
-                    with JOB_DURATION.time():
-                        result = await self.scraper.fetch(job.url, context_id=job.context_id)
+                        with JOB_DURATION.time():
+                            result = await self.scraper.fetch(job.url, context_id=job.context_id)
 
-                    if not result or not isinstance(result, dict):
-                        raise ScraperError(
-                            "No content could be fetched from the URL",
-                            "no_content",
-                            retryable=True,
-                        )
-                    
-                    job.result = result
-                    job.status = "completed"
-                    job.error = None
-                    job.error_details = None
-                    JOBS_TOTAL.labels(status="completed").inc()
-                    break
+                        if not result or not isinstance(result, dict):
+                            raise ScraperError(
+                                "No content could be fetched from the URL",
+                                "no_content",
+                                retryable=True,
+                            )
+                        
+                        job.result = result
+                        job.status = "completed"
+                        job.error = None
+                        job.error_details = None
+                        JOBS_TOTAL.labels(status="completed").inc()
+                        break
                     except ScraperError as e:
                         logger.error(f"Scraper error for job {job_id}: {e.message}")
                         job.error = e.message
