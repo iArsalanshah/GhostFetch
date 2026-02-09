@@ -3,7 +3,7 @@ GhostFetch - A stealthy headless browser service for AI agents.
 Bypasses anti-bot protections to fetch content and convert to clean Markdown.
 """
 
-__version__ = "2026.2.9"
+__version__ = "2026.2.9.1"
 
 from ghostfetch.fetch import fetch, fetch_async, fetch_markdown
 from ghostfetch.client import GhostFetchClient
