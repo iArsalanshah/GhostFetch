@@ -3,13 +3,11 @@ name: ghostfetch
 description: Stealthy web fetching for AI agents. Bypasses blocks on X.com and other sites to return clean Markdown.
 homepage: https://github.com/iArsalanshah/GhostFetch
 metadata:
-  {
-    "openclaw":
-      {
-        "emoji": "👻",
-        "requires": { "bins": ["python3"] },
-      },
-  }
+  openclaw:
+    emoji: "👻"
+    requires:
+      bins:
+        - python3
 ---
 
 # GhostFetch
@@ -18,10 +16,9 @@ GhostFetch is a stealthy headless browser service designed specifically for AI a
 
 ## Installation
 
-GhostFetch is already in your workspace at `GhostFetch/`. To use it as a skill, ensure the Python environment is set up:
+GhostFetch is already in your workspace at the repo root. To use it as a skill, ensure the Python environment is set up from the repo directory:
 
 ```bash
-cd GhostFetch
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
