@@ -156,7 +156,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "ghostfetch",
-                        "version": "2026.2.9.1"
+                        "version": "2026.2.10"
                     }
                 }
             
@@ -205,27 +205,23 @@ class MCPServer:
         )
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
         
-        try:
-            while True:
-                # Read message length header
-                line = await reader.readline()
-                if not line:
-                    break
-                
-                try:
-                    message = json.loads(line.decode().strip())
-                except json.JSONDecodeError:
-                    continue
-                
-                response = await self.handle_message(message)
-                
-                if response:
-                    response_bytes = (json.dumps(response) + "\n").encode()
-                    writer.write(response_bytes)
-                    await writer.drain()
-        
-        finally:
-            await self.cleanup()
+        while True:
+            # Read message length header
+            line = await reader.readline()
+            if not line:
+                break
+            
+            try:
+                message = json.loads(line.decode().strip())
+            except json.JSONDecodeError:
+                continue
+            
+            response = await self.handle_message(message)
+            
+            if response:
+                response_bytes = (json.dumps(response) + "\n").encode()
+                writer.write(response_bytes)
+                await writer.drain()
 
 
 async def main():
@@ -236,15 +232,15 @@ async def main():
     
     # Handle shutdown signals gracefully
     def handle_shutdown(signum, frame):
-        asyncio.create_task(server.cleanup())
-        sys.exit(0)
+        # Raising SystemExit ensures the finally block runs
+        raise SystemExit(0)
     
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
     
     try:
         await server.run_stdio()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         await server.cleanup()

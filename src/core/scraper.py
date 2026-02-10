@@ -205,7 +205,7 @@ class StealthScraper:
                     raise ScraperError(f"Error fetching {domain}: {str(e)}", "fetch_error", retryable=True)
                 
                 # Human-like jitter
-                await asyncio.sleep(random.uniform(1.5, 3.0))
+                await asyncio.sleep(random.uniform(settings.JITTER_MIN, settings.JITTER_MAX))
 
                 # Specific handling for X.com / Twitter (selector wait only)
                 if "x.com" in url or "twitter.com" in url:

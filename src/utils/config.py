@@ -7,7 +7,9 @@ class Settings:
     
     # Scraper Settings
     MAX_CONCURRENT_BROWSERS = int(os.getenv("MAX_CONCURRENT_BROWSERS", 2))
-    MIN_DOMAIN_DELAY = int(os.getenv("MIN_DOMAIN_DELAY", 10))
+    MIN_DOMAIN_DELAY = int(os.getenv("MIN_DOMAIN_DELAY", 30))
+    JITTER_MIN = float(os.getenv("JITTER_MIN", 3.0))
+    JITTER_MAX = float(os.getenv("JITTER_MAX", 7.0))
     MAX_REQUESTS_PER_BROWSER = int(os.getenv("MAX_REQUESTS_PER_BROWSER", 50))
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
     

@@ -154,7 +154,7 @@ Examples:
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--metadata-only", action="store_true", help="Only output metadata")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
-    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.2.9.1")
+    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.2.10")
     
     args = parser.parse_args()
     

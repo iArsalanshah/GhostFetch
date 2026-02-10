@@ -164,7 +164,9 @@ GhostFetch is configured via environment variables.
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `MAX_CONCURRENT_BROWSERS` | `2` | Max concurrent browser contexts |
-| `MIN_DOMAIN_DELAY` | `10` | Seconds between requests to same domain |
+| `MIN_DOMAIN_DELAY` | `30` | Seconds between requests to same domain |
+| `JITTER_MIN` | `3.0` | Minimum random wait time after page load |
+| `JITTER_MAX` | `7.0` | Maximum random wait time after page load |
 | `GHOSTFETCH_PORT` | `8000` | Port for the API server |
 | `PROXY_STRATEGY` | `round_robin` | `round_robin` or `random` |
 
