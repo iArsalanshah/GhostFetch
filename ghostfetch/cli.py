@@ -138,26 +138,58 @@ Examples:
         """
     )
     
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-    
-    # Serve command
-    serve_parser = subparsers.add_parser("serve", help="Start the API server")
-    serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
-    serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
-    serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
-    
-    # Setup command
-    setup_parser = subparsers.add_parser("setup", help="Install required browser dependencies")
-    
-    # URL argument (for direct fetch)
-    parser.add_argument("url", nargs="?", help="URL to fetch")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--metadata-only", action="store_true", help="Only output metadata")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
     parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.2.10")
     
+    # To prevent argparse from treating a URL as an invalid subcommand, we pre-parse
+    # global options to find the first true positional argument safely.
+    base_parser = argparse.ArgumentParser(add_help=False)
+    base_parser.add_argument("--json", action="store_true")
+    base_parser.add_argument("--metadata-only", action="store_true")
+    base_parser.add_argument("--quiet", "-q", action="store_true")
+    base_parser.add_argument("--version", "-v", action="store_true")
+
+    # parse_known_args will ignore unconfigured positionals/flags and return them in `remaining`
+    _, remaining = base_parser.parse_known_args(sys.argv[1:])
+
+    # The first item in `remaining` that isn't a flag is our command or URL
+    first_positional = None
+    for arg in remaining:
+        if not arg.startswith("-"):
+            first_positional = arg
+            break
+
+    is_help = "-h" in sys.argv or "--help" in sys.argv
+    known_commands = ["serve", "setup"]
+
+    if first_positional in known_commands or is_help:
+        # If the user is running a subcommand or requesting help, add subparsers
+        subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+        # Serve command
+        serve_parser = subparsers.add_parser("serve", help="Start the API server")
+        serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+        serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+        serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
+
+        # Setup command
+        setup_parser = subparsers.add_parser("setup", help="Install required browser dependencies")
+
+        if is_help and first_positional not in known_commands:
+            # If asking for global help, also document the optional URL positional
+            parser.add_argument("url", nargs="?", help="URL to fetch")
+    else:
+        # It's a URL or empty, no subparsers needed. Add URL as positional.
+        parser.add_argument("url", nargs="?", help="URL to fetch")
+
     args = parser.parse_args()
     
+    # Ensure command attribute exists if we bypassed subparsers
+    if not hasattr(args, "command"):
+        args.command = None
+
     # Handle commands
     if args.command == "serve":
         # Ensure browsers before serving
