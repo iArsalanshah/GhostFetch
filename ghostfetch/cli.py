@@ -152,7 +152,7 @@ Examples:
     )
     
     # Global flags (also available on subparsers for flexibility)
-    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.2.10")
+    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.3.25")
     
     subparsers = parser.add_subparsers(dest="command", help="Commands")
     
