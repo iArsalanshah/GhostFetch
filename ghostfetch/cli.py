@@ -123,6 +123,19 @@ def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
 
 def main():
     """Main CLI entry point."""
+    # Pre-process arguments to support ghostfetch <url> directly
+    # If the first positional argument is not a known command, assume it's a URL
+    # and insert the 'fetch' command implicitly.
+    commands = ['serve', 'setup', 'fetch']
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if not arg.startswith('-'):
+            if arg in commands:
+                break
+            # Not a known command, must be a URL or invalid choice
+            # We insert 'fetch' to handle it gracefully
+            sys.argv.insert(i, "fetch")
+            break
+
     parser = argparse.ArgumentParser(
         prog="ghostfetch",
         description="🔍 GhostFetch - Stealthy web fetcher for AI agents",
@@ -138,8 +151,26 @@ Examples:
         """
     )
     
+    # Global flags (also available on subparsers for flexibility)
+    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.3.25")
+    
     subparsers = parser.add_subparsers(dest="command", help="Commands")
     
+    # Shared flags for fetch operation
+    fetch_shared = argparse.ArgumentParser(add_help=False)
+    fetch_shared.add_argument("--json", action="store_true", help="Output as JSON")
+    fetch_shared.add_argument("--metadata-only", action="store_true", help="Only output metadata")
+    fetch_shared.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
+
+    # Fetch command
+    fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL (default command)", parents=[fetch_shared])
+    fetch_parser.add_argument("url", help="URL to fetch")
+    
+    # Add shared flags to root too so they work before the command
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--metadata-only", action="store_true", help="Only output metadata")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
+
     # Serve command
     serve_parser = subparsers.add_parser("serve", help="Start the API server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
@@ -148,13 +179,6 @@ Examples:
     
     # Setup command
     setup_parser = subparsers.add_parser("setup", help="Install required browser dependencies")
-    
-    # URL argument (for direct fetch)
-    parser.add_argument("url", nargs="?", help="URL to fetch")
-    parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument("--metadata-only", action="store_true", help="Only output metadata")
-    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
-    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.2.10")
     
     args = parser.parse_args()
     
@@ -175,10 +199,15 @@ Examples:
             print("\n❌ Setup failed. Please try manually: playwright install chromium")
             sys.exit(1)
             
-    elif args.url:
+    elif args.command == "fetch":
         # Direct fetch mode
+        url = args.url
+        if not url:
+            parser.print_help()
+            sys.exit(0)
+            
         if not args.quiet:
-            print(f"🔍 Fetching {args.url}...", file=sys.stderr)
+            print(f"🔍 Fetching {url}...", file=sys.stderr)
         
         # Auto-install browsers if needed (silent for non-interactive use)
         if not ensure_browsers_installed(quiet=args.quiet):
@@ -187,7 +216,7 @@ Examples:
             sys.exit(1)
         
         output_format = "json" if args.json else "markdown"
-        run_fetch(args.url, output_format=output_format, metadata_only=args.metadata_only)
+        run_fetch(url, output_format=output_format, metadata_only=args.metadata_only)
         
     else:
         parser.print_help()
