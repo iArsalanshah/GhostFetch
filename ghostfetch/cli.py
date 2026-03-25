@@ -199,9 +199,9 @@ Examples:
             print("\n❌ Setup failed. Please try manually: playwright install chromium")
             sys.exit(1)
             
-    elif args.command == "fetch" or getattr(args, "url", None):
+    elif args.command == "fetch":
         # Direct fetch mode
-        url = getattr(args, "url", None)
+        url = args.url
         if not url:
             parser.print_help()
             sys.exit(0)
