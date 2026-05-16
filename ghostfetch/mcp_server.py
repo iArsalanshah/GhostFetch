@@ -28,6 +28,8 @@ from typing import Any, Dict, Optional
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.utils.security import validate_target_url, URLValidationError
+from src.utils.security import validate_context_id
+from ghostfetch.version import __version__
 
 
 class MCPServer:
@@ -99,9 +101,13 @@ class MCPServer:
             }
         
         try:
+            timeout = float(timeout)
+            if timeout < 0:
+                raise URLValidationError("timeout must be non-negative")
             safe_url = validate_target_url(url)
+            safe_context_id = validate_context_id(context_id)
             result = await asyncio.wait_for(
-                self.scraper.fetch(safe_url, context_id=context_id),
+                self.scraper.fetch(safe_url, context_id=safe_context_id),
                 timeout=timeout
             )
             
@@ -163,7 +169,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "ghostfetch",
-                        "version": "2026.3.25"
+                        "version": __version__
                     }
                 }
             
@@ -212,25 +218,10 @@ class MCPServer:
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
         
         while True:
-            headers: Dict[str, str] = {}
-            while True:
-                line = await reader.readline()
-                if not line:
-                    return
-                if line in (b"\r\n", b"\n"):
-                    break
-                decoded = line.decode("utf-8", errors="replace").strip()
-                if ":" in decoded:
-                    key, value = decoded.split(":", 1)
-                    headers[key.strip().lower()] = value.strip()
-
-            content_length = headers.get("content-length")
-            if not content_length:
-                continue
-
             try:
-                body = await reader.readexactly(int(content_length))
-                message = json.loads(body.decode("utf-8"))
+                message = await self._read_framed_message(reader)
+                if message is None:
+                    return
             except Exception:
                 continue
 
@@ -238,13 +229,38 @@ class MCPServer:
             if not response:
                 continue
 
-            response_body = json.dumps(response).encode("utf-8")
-            response_headers = (
-                f"Content-Length: {len(response_body)}\r\n"
-                "Content-Type: application/json\r\n\r\n"
-            ).encode("utf-8")
-            writer.write(response_headers + response_body)
+            writer.write(self._encode_framed_message(response))
             await writer.drain()
+
+    @staticmethod
+    def _encode_framed_message(payload: Dict[str, Any]) -> bytes:
+        body = json.dumps(payload).encode("utf-8")
+        headers = (
+            f"Content-Length: {len(body)}\r\n"
+            "Content-Type: application/json\r\n\r\n"
+        ).encode("utf-8")
+        return headers + body
+
+    @staticmethod
+    async def _read_framed_message(reader: asyncio.StreamReader) -> Optional[Dict[str, Any]]:
+        headers: Dict[str, str] = {}
+        while True:
+            line = await reader.readline()
+            if not line:
+                return None
+            if line in (b"\r\n", b"\n"):
+                break
+            decoded = line.decode("utf-8", errors="replace").strip()
+            if ":" in decoded:
+                key, value = decoded.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+
+        content_length = headers.get("content-length")
+        if not content_length:
+            raise ValueError("Missing content-length")
+
+        body = await reader.readexactly(int(content_length))
+        return json.loads(body.decode("utf-8"))
 
 
 async def main():

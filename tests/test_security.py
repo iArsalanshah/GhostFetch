@@ -2,7 +2,14 @@ import pytest
 
 import src.utils.security as security
 from src.utils.config import settings
-from src.utils.security import URLValidationError, validate_callback_url, validate_target_url
+from src.utils.security import (
+    URLValidationError,
+    context_storage_path,
+    validate_callback_url,
+    validate_context_id,
+    validate_proxy_url,
+    validate_target_url,
+)
 
 
 def test_validate_target_url_accepts_https(monkeypatch):
@@ -40,3 +47,16 @@ def test_validate_callback_allowlist(monkeypatch):
     assert validate_callback_url("https://hooks.example.com/path") == "https://hooks.example.com/path"
     with pytest.raises(URLValidationError):
         validate_callback_url("https://evil.example.net/path")
+
+
+def test_context_id_validation_and_path():
+    cid = validate_context_id("session_123")
+    path = context_storage_path("storage", cid)
+    assert path.endswith("context_session_123.json")
+    with pytest.raises(URLValidationError):
+        validate_context_id("../../../etc/passwd")
+
+
+def test_validate_proxy_url_rejects_localhost():
+    with pytest.raises(URLValidationError):
+        validate_proxy_url("http://127.0.0.1:8080")

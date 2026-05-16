@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 import uvicorn
-import logging
 import json
 import asyncio
 from contextlib import asynccontextmanager
@@ -12,11 +11,22 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from src.core.scraper import StealthScraper, ScraperError, logger
 from src.core.job_manager import JobManager
 from src.utils.config import settings
-from src.utils.security import validate_target_url, validate_callback_url, URLValidationError
+from src.utils.security import (
+    validate_target_url,
+    validate_callback_url,
+    validate_context_id,
+    URLValidationError,
+)
+from ghostfetch.version import __version__
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if settings.REQUIRE_API_KEY and not settings.API_KEY:
+        logger.warning(
+            "SECURITY: REQUIRE_API_KEY is enabled but GHOSTFETCH_API_KEY is not set. "
+            "All authenticated fetch endpoints will reject requests."
+        )
     logger.info("Starting Playwright browser and job manager...")
     await scraper.start()
     await job_manager.start()
@@ -32,7 +42,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="GhostFetch API", 
     description="Stealthy headless browser API for AI agents. Fetches content from hard-to-scrape sites and converts to Markdown.",
-    version="2026.3.25",
+    version=__version__,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
@@ -46,7 +56,7 @@ class FetchRequest(BaseModel):
     url: str = Field(..., description="The URL to fetch")
     context_id: Optional[str] = Field(None, description="Context ID for session persistence (cookies/localStorage)")
     callback_url: Optional[str] = Field(None, description="Webhook URL to receive results when job completes")
-    github_issue: Optional[int] = Field(None, description="GitHub issue number to post results as a comment")
+    github_issue: Optional[int] = Field(None, ge=1, description="GitHub issue number to post results as a comment")
 
 
 class SyncFetchRequest(BaseModel):
@@ -54,7 +64,8 @@ class SyncFetchRequest(BaseModel):
     url: str = Field(..., description="The URL to fetch")
     context_id: Optional[str] = Field(None, description="Context ID for session persistence")
     timeout: Optional[float] = Field(
-        None, 
+        None,
+        ge=0.0,
         description=f"Maximum time to wait in seconds (default: {settings.SYNC_TIMEOUT_DEFAULT}, max: {settings.MAX_SYNC_TIMEOUT})"
     )
 
@@ -89,10 +100,11 @@ async def fetch_endpoint(request: FetchRequest, _: None = Depends(_enforce_api_k
     """
     try:
         url = validate_target_url(request.url)
+        context_id = validate_context_id(request.context_id)
         callback_url = validate_callback_url(request.callback_url)
         job_id = await job_manager.submit_job(
             url,
-            context_id=request.context_id,
+            context_id=context_id,
             callback_url=callback_url,
             github_issue=request.github_issue
         )
@@ -127,9 +139,10 @@ async def fetch_sync_endpoint(request: SyncFetchRequest, _: None = Depends(_enfo
     
     try:
         url = validate_target_url(request.url)
+        context_id = validate_context_id(request.context_id)
         # Direct fetch with timeout
         result = await asyncio.wait_for(
-            scraper.fetch(url, context_id=request.context_id),
+            scraper.fetch(url, context_id=context_id),
             timeout=timeout
         )
         
@@ -161,7 +174,8 @@ async def fetch_sync_get_endpoint(
     url: str = Query(..., description="The URL to fetch"),
     context_id: Optional[str] = Query(None, description="Context ID for session persistence"),
     timeout: Optional[float] = Query(
-        None, 
+        None,
+        ge=0.0,
         description=f"Maximum time to wait in seconds (default: {settings.SYNC_TIMEOUT_DEFAULT}, max: {settings.MAX_SYNC_TIMEOUT})"
     ),
     _: None = Depends(_enforce_api_key)
@@ -177,7 +191,7 @@ async def fetch_sync_get_endpoint(
 
 
 @app.get("/events")
-async def sse_endpoint(request: Request):
+async def sse_endpoint(request: Request, _: None = Depends(_enforce_api_key)):
     """
     Server-Sent Events (SSE) endpoint for real-time job updates.
     """
@@ -190,7 +204,7 @@ async def sse_endpoint(request: Request):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/job/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, _: None = Depends(_enforce_api_key)):
     """
     Get the status and result of a fetch job.
     """
@@ -215,4 +229,4 @@ async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True)
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)

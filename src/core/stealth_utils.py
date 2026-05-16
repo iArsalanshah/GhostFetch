@@ -2,6 +2,7 @@ import random
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict
+from src.utils.security import validate_proxy_url, URLValidationError
 
 logger = logging.getLogger("GhostFetch.Stealth")
 
@@ -27,8 +28,6 @@ class RandomStrategy(ProxyStrategy):
             return None
         return random.choice(proxies)
 
-from urllib.parse import urlparse
-
 class ProxyManager:
     """Manages proxy rotation, health tracking, and latency profiling."""
     def __init__(self, proxies: List[str], strategy: Optional[ProxyStrategy] = None):
@@ -44,9 +43,9 @@ class ProxyManager:
     def _validate_proxy(self, proxy_url: str) -> bool:
         """Validate proxy URL format"""
         try:
-            result = urlparse(proxy_url)
-            return result.scheme in ['http', 'https'] and result.netloc
-        except:
+            validate_proxy_url(proxy_url)
+            return True
+        except URLValidationError:
             return False
 
     def get_next_proxy(self) -> Optional[str]:

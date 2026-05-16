@@ -3,6 +3,7 @@ import random
 import sys
 import logging
 import time
+import json
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
@@ -11,10 +12,23 @@ import html2text
 import os
 from src.utils.config import settings
 from src.core.stealth_utils import ProxyManager, FingerprintGenerator, RoundRobinStrategy, RandomStrategy
+from src.utils.security import validate_context_id, context_storage_path, validate_target_url
 from prometheus_client import Gauge, Histogram
 
 from logging.handlers import RotatingFileHandler
-import time
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        payload = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=True)
 
 # Setup logging
 os.makedirs(settings.STORAGE_DIR, exist_ok=True)
@@ -22,12 +36,17 @@ log_path = os.path.join(settings.STORAGE_DIR, "scraper.log")
 handler = RotatingFileHandler(log_path, maxBytes=5*1024*1024, backupCount=5)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     handlers=[
         logging.StreamHandler(),
         handler
     ]
 )
+if settings.LOG_FORMAT == "json":
+    formatter = JsonFormatter()
+else:
+    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s')
+for h in logging.getLogger().handlers:
+    h.setFormatter(formatter)
 logger = logging.getLogger("GhostFetch")
 
 # Prometheus Metrics
@@ -95,6 +114,10 @@ class StealthScraper:
             self.playwright = None
 
     async def fetch(self, url: str, context_id: Optional[str] = None):
+        # Re-validate user-controlled values at execution time to reduce TOCTOU risk.
+        safe_url = validate_target_url(url)
+        safe_context_id = validate_context_id(context_id)
+
         async with self.semaphore:
             async with self.restart_lock:
                 self.requests_count += 1
@@ -105,7 +128,7 @@ class StealthScraper:
                 await self.start()
 
             # Domain-based storage state for cookie persistence
-            domain = urlparse(url).netloc
+            domain = urlparse(safe_url).netloc
             
             # Domain-level rate limiting
             now = time.time()
@@ -119,13 +142,13 @@ class StealthScraper:
             self.last_fetch[domain] = time.time()
             
             # Storage path: uses context_id if provided, otherwise domain-based
-            if context_id:
-                storage_path = os.path.join(settings.STORAGE_DIR, f"context_{context_id}.json")
+            if safe_context_id:
+                storage_path = context_storage_path(settings.STORAGE_DIR, safe_context_id)
             else:
                 storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
             
             # Session Coherence: Cache fingerprint per context or domain
-            cache_key = context_id if context_id else domain
+            cache_key = safe_context_id if safe_context_id else domain
             if cache_key in self.domain_fingerprints:
                 fp, ts = self.domain_fingerprints[cache_key]
                 if time.time() - ts < self.fingerprint_ttl:
@@ -169,7 +192,9 @@ class StealthScraper:
                 
                 # 60s timeout for page load
                 try:
-                    response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    # Validate again immediately before the network call.
+                    safe_url = validate_target_url(safe_url)
+                    response = await page.goto(safe_url, wait_until="domcontentloaded", timeout=60000)
                     if not response:
                         if proxy_url:
                             self.proxy_manager.mark_bad(proxy_url)
@@ -208,7 +233,7 @@ class StealthScraper:
                 await asyncio.sleep(random.uniform(settings.JITTER_MIN, settings.JITTER_MAX))
 
                 # Specific handling for X.com / Twitter (selector wait only)
-                if "x.com" in url or "twitter.com" in url:
+                if "x.com" in safe_url or "twitter.com" in safe_url:
                     try:
                         await page.wait_for_selector('[data-testid="tweetText"]', timeout=30000)
                     except Exception:

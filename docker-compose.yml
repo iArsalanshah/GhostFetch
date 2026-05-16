@@ -11,3 +11,4 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - GHOSTFETCH_API_KEY=${GHOSTFETCH_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}

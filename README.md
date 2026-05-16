@@ -143,7 +143,8 @@ curl "http://localhost:8000/health"
 
 **Check Job Status:**
 ```bash
-curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+  "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
 ```
 
 ### Response Format
@@ -180,10 +181,18 @@ GhostFetch is configured via environment variables.
 | `REQUIRE_API_KEY` | `true` | Enable `X-API-Key` enforcement on fetch endpoints |
 | `BLOCK_PRIVATE_NETWORKS` | `true` | Blocks localhost/private IP targets to reduce SSRF risk |
 | `CALLBACK_ALLOWED_HOSTS` | _empty_ | Optional comma-separated callback host allowlist |
+| `CALLBACK_MAX_ATTEMPTS` | `3` | Max retries for webhook callback delivery |
+| `CALLBACK_RETRY_BASE_SECONDS` | `1.0` | Base delay used for exponential callback retry |
+| `GITHUB_TOKEN` | _empty_ | Token used for posting GitHub issue comments via API |
+| `LOG_FORMAT` | `text` | Set to `json` for structured logs |
+| `GHOSTFETCH_DEBUG` | `false` | Enables development reload mode when running `python main.py` |
 
 **Proxies:**
 Create a `proxies.txt` file in the working directory with one proxy per line:
 `http://user:pass@host:port`
+
+Concurrency note:
+`MAX_CONCURRENT_BROWSERS` is a global browser-context cap shared by both sync and async fetch paths.
 
 ---
 
