@@ -1,6 +1,7 @@
 import requests
 import time
 import json
+import os
 from typing import Optional, Dict, Any, Generator
 
 class GhostFetchClient:
@@ -9,6 +10,12 @@ class GhostFetchClient:
     """
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url.rstrip("/")
+        self.api_key = os.getenv("GHOSTFETCH_API_KEY", "").strip()
+
+    def _headers(self) -> Dict[str, str]:
+        if not self.api_key:
+            return {}
+        return {"X-API-Key": self.api_key}
 
     def fetch(self, url: str, context_id: Optional[str] = None, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
         """
@@ -20,7 +27,7 @@ class GhostFetchClient:
             "callback_url": callback_url,
             "github_issue": github_issue
         }
-        response = requests.post(f"{self.base_url}/fetch", json=payload)
+        response = requests.post(f"{self.base_url}/fetch", json=payload, headers=self._headers())
         response.raise_for_status()
         return response.json()["job_id"]
 
@@ -28,7 +35,7 @@ class GhostFetchClient:
         """
         Get the current status and result of a job.
         """
-        response = requests.get(f"{self.base_url}/job/{job_id}")
+        response = requests.get(f"{self.base_url}/job/{job_id}", headers=self._headers())
         response.raise_for_status()
         return response.json()
 
@@ -48,7 +55,7 @@ class GhostFetchClient:
         """
         Subscribe to the SSE stream for real-time updates on all jobs.
         """
-        response = requests.get(f"{self.base_url}/events", stream=True)
+        response = requests.get(f"{self.base_url}/events", stream=True, headers=self._headers())
         response.raise_for_status()
         for line in response.iter_lines():
             if line:
@@ -60,7 +67,7 @@ class GhostFetchClient:
         """
         Get Prometheus metrics.
         """
-        response = requests.get(f"{self.base_url}/metrics")
+        response = requests.get(f"{self.base_url}/metrics", headers=self._headers())
         response.raise_for_status()
         return response.text
 

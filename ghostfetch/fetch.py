@@ -50,7 +50,14 @@ async def fetch_async(url: str, context_id: Optional[str] = None, timeout: float
             scraper.fetch(url, context_id=context_id),
             timeout=timeout
         )
-        return result if result else {"metadata": {}, "markdown": ""}
+        if not result:
+            return {"metadata": {}, "markdown": "", "url": url, "status": "empty"}
+        return {
+            "metadata": result.get("metadata", {}),
+            "markdown": result.get("markdown", ""),
+            "url": url,
+            "status": "success",
+        }
     finally:
         await scraper.stop()
 

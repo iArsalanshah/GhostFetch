@@ -1,12 +1,13 @@
 import asyncio
 import uuid
 import time
-import requests
 import sqlite3
 import json
 import os
 import logging
 from typing import Dict, Optional, List
+import random
+import httpx
 from pydantic import BaseModel
 from src.utils.config import settings
 from prometheus_client import Counter, Histogram, Gauge
@@ -29,6 +30,7 @@ class Job(BaseModel):
     result: Optional[dict] = None
     error: Optional[str] = None
     error_details: Optional[dict] = None
+    callback_status: Optional[str] = None
     created_at: float
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
@@ -38,13 +40,21 @@ class JobManager:
         self.scraper = scraper
         self.queue = asyncio.Queue()
         self.workers = []
+        self.cleanup_task: Optional[asyncio.Task] = None
         self.subscribers: List[asyncio.Queue] = []
         self._init_db()
+
+    def _connect_db(self):
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
 
     def _init_db(self):
         os.makedirs(settings.STORAGE_DIR, exist_ok=True)
         self.db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
@@ -56,23 +66,28 @@ class JobManager:
                     result TEXT,
                     error TEXT,
                     error_details TEXT,
+                    callback_status TEXT,
                     created_at REAL,
                     started_at REAL,
                     completed_at REAL
                 )
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+            if "callback_status" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN callback_status TEXT")
 
     def _save_job(self, job: Job):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs 
-                (id, url, context_id, callback_url, github_issue, status, result, error, error_details, created_at, started_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, url, context_id, callback_url, github_issue, status, result, error, error_details, callback_status, created_at, started_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job.id, job.url, job.context_id, job.callback_url, job.github_issue, job.status,
                 json.dumps(job.result) if job.result else None,
                 job.error,
                 json.dumps(job.error_details) if job.error_details else None,
+                job.callback_status,
                 job.created_at, job.started_at, job.completed_at
             ))
         self._broadcast({"type": "job_update", "job_id": job.id, "status": job.status})
@@ -91,7 +106,7 @@ class JobManager:
             self.subscribers.remove(q)
 
     def _get_job_from_db(self, job_id: str) -> Optional[Job]:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if row:
@@ -105,18 +120,32 @@ class JobManager:
         for _ in range(settings.MAX_CONCURRENT_BROWSERS):
             worker = asyncio.create_task(self._worker())
             self.workers.append(worker)
-        asyncio.create_task(self._cleanup_task())
+        self.cleanup_task = asyncio.create_task(self._cleanup_task())
         logger.info(f"Started {settings.MAX_CONCURRENT_BROWSERS} workers and cleanup task.")
 
     async def stop(self):
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
+        self.workers.clear()
+        if self.cleanup_task:
+            self.cleanup_task.cancel()
+            await asyncio.gather(self.cleanup_task, return_exceptions=True)
+            self.cleanup_task = None
         logger.info("Stopped workers.")
 
     async def submit_job(self, url: str, context_id: Optional[str] = None, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
         job_id = str(uuid.uuid4())
-        job = Job(id=job_id, url=url, context_id=context_id, callback_url=callback_url, github_issue=github_issue, created_at=time.time())
+        callback_status = "pending" if callback_url else "not_configured"
+        job = Job(
+            id=job_id,
+            url=url,
+            context_id=context_id,
+            callback_url=callback_url,
+            github_issue=github_issue,
+            callback_status=callback_status,
+            created_at=time.time(),
+        )
         self._save_job(job)
         await self.queue.put(job_id)
         logger.info(f"Job {job_id} submitted for {url}")
@@ -156,7 +185,12 @@ class JobManager:
                                 retryable=True,
                             )
                         
-                        job.result = result
+                        job.result = {
+                            "metadata": result.get("metadata", {}),
+                            "markdown": result.get("markdown", ""),
+                            "url": job.url,
+                            "status": "success",
+                        }
                         job.status = "completed"
                         job.error = None
                         job.error_details = None
@@ -169,7 +203,6 @@ class JobManager:
                         
                         if e.retryable and attempt < settings.MAX_RETRIES:
                             attempt += 1
-                            import random
                             delay = (2 ** attempt) + random.uniform(0, 1)
                             logger.info(f"Retrying job {job_id} in {delay:.2f}s...")
                             await asyncio.sleep(delay)
@@ -199,39 +232,66 @@ class JobManager:
             ACTIVE_WORKERS.dec()
 
     async def _send_callback_async(self, job: Job):
-        await asyncio.to_thread(self._send_callback, job)
-
-    def _send_callback(self, job: Job):
+        payload = {
+            "job_id": job.id,
+            "url": job.url,
+            "status": job.status,
+            "data": job.result,
+            "error": job.error,
+            "error_details": job.error_details,
+        }
         try:
-            payload = {
-                "job_id": job.id,
-                "url": job.url,
-                "status": job.status,
-                "data": job.result,
-                "error": job.error,
-                "error_details": job.error_details
-            }
-            requests.post(job.callback_url, json=payload, timeout=10)
-            logger.info(f"Callback sent for job {job.id} to {job.callback_url}")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                attempts = settings.CALLBACK_MAX_ATTEMPTS
+                for attempt in range(1, attempts + 1):
+                    try:
+                        response = await client.post(job.callback_url, json=payload)
+                        if response.status_code >= 500:
+                            raise httpx.HTTPStatusError(
+                                f"Server error {response.status_code}",
+                                request=response.request,
+                                response=response,
+                            )
+                        response.raise_for_status()
+                        job.callback_status = "delivered"
+                        self._save_job(job)
+                        logger.info(f"Callback sent for job {job.id} to {job.callback_url}")
+                        return
+                    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                        if attempt >= attempts:
+                            raise exc
+                        delay = settings.CALLBACK_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+                        await asyncio.sleep(delay)
+            job.callback_status = "failed"
+            self._save_job(job)
         except Exception as e:
+            job.callback_status = "failed"
+            self._save_job(job)
             logger.error(f"Failed to send callback for job {job.id}: {e}")
 
     async def _send_github_comment_async(self, job: Job):
-        await asyncio.to_thread(self._send_github_comment, job)
-
-    def _send_github_comment(self, job: Job):
-        import subprocess
+        if not settings.GITHUB_TOKEN:
+            logger.warning("Skipping GitHub comment for job %s: GITHUB_TOKEN is not set", job.id)
+            return
         try:
             repo = settings.GITHUB_REPO
             if job.status == "completed":
                 markdown = job.result.get("markdown", "") if isinstance(job.result, dict) else ""
                 size_kb = len(markdown) / 1024
-                body = f"✅ **Done**: Extracted {size_kb:.1f}KB markdown for {job.url}"
+                body = f"Done: Extracted {size_kb:.1f}KB markdown for {job.url}"
             else:
                 retry_text = "(retryable)" if job.error_details and job.error_details.get("retryable") else "(fatal)"
-                body = f"❌ **Failed**: {job.error} {retry_text}"
-            
-            subprocess.run(["gh", "issue", "comment", str(job.github_issue), "--body", body, "--repo", repo], check=True)
+                body = f"Failed: {job.error} {retry_text}"
+
+            endpoint = f"https://api.github.com/repos/{repo}/issues/{job.github_issue}/comments"
+            headers = {
+                "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(endpoint, headers=headers, json={"body": body})
+                response.raise_for_status()
             logger.info(f"GitHub comment sent for job {job.id} to issue #{job.github_issue}")
         except Exception as e:
             logger.error(f"Failed to send GitHub comment for job {job.id}: {e}")
@@ -240,7 +300,7 @@ class JobManager:
         while True:
             try:
                 cutoff = time.time() - settings.JOB_TTL_SECONDS
-                with sqlite3.connect(self.db_path) as conn:
+                with self._connect_db() as conn:
                     conn.execute("DELETE FROM jobs WHERE completed_at IS NOT NULL AND completed_at < ?", (cutoff,))
                 logger.debug("Cleaned up old jobs from database.")
             except Exception as e:

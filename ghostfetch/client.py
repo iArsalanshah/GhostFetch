@@ -12,6 +12,7 @@ Usage:
 import requests
 import time
 import json
+import os
 from typing import Optional, Dict, Any, Generator
 
 
@@ -35,7 +36,7 @@ class GhostFetchClient:
         result = client.wait_for_job(job_id)
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:8000", api_key: Optional[str] = None):
         """
         Initialize the GhostFetch client.
         
@@ -43,7 +44,10 @@ class GhostFetchClient:
             base_url: The base URL of the GhostFetch API server
         """
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key if api_key is not None else os.getenv("GHOSTFETCH_API_KEY", "").strip()
         self.session = requests.Session()
+        if self.api_key:
+            self.session.headers.update({"X-API-Key": self.api_key})
     
     def fetch_sync(
         self, 

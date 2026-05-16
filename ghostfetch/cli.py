@@ -17,6 +17,7 @@ import subprocess
 import sys
 import os
 from typing import Optional
+from ghostfetch.version import __version__
 
 
 def install_browsers(quiet: bool = False) -> bool:
@@ -152,7 +153,7 @@ Examples:
     )
     
     # Global flags (also available on subparsers for flexibility)
-    parser.add_argument("--version", "-v", action="version", version="%(prog)s 2026.3.25")
+    parser.add_argument("--version", "-v", action="version", version=f"%(prog)s {__version__}")
     
     subparsers = parser.add_subparsers(dest="command", help="Commands")
     

@@ -12,6 +12,7 @@ Add the `github_issue` parameter to your request:
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
      -d '{
            "url": "https://example.com",
            "github_issue": 42
@@ -21,11 +22,9 @@ curl -X POST "http://localhost:8000/fetch" \
 *Result will be posted as a comment on issue #42 of the configured repository.*
 
 ### Requirements
-1.  **GitHub CLI (`gh`)**: Must be installed on the server (`brew install gh` or `apt install gh`).
-2.  **Authentication**: Run `gh auth login` on the server.
-3.  **Environment Variables**:
+1.  **Environment Variables**:
     *   `GITHUB_REPO`: The `owner/repo` to post to (e.g., `iArsalanshah/GhostFetch`).
-    *   `GITHUB_TOKEN`: (Optional) Auth token if not logged in via CLI.
+    *   `GITHUB_TOKEN`: Required token with issue comment permissions.
 
 ---
 
@@ -64,6 +63,8 @@ For high-volume scraping, we recommend using Docker Compose with environment var
 
 Create a `.env` file:
 ```bash
+GHOSTFETCH_API_KEY=replace-with-strong-token
+GITHUB_TOKEN=ghp_your_token
 MAX_CONCURRENT_BROWSERS=4
 MIN_DOMAIN_DELAY=5
 GITHUB_REPO=your-org/your-repo

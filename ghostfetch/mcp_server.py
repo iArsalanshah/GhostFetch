@@ -27,6 +27,11 @@ from typing import Any, Dict, Optional
 # Add parent directory for imports
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils.security import validate_target_url, URLValidationError
+from src.utils.security import validate_context_id
+from ghostfetch.version import __version__
+
+MAX_MCP_MESSAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 class MCPServer:
@@ -85,8 +90,6 @@ class MCPServer:
                 "content": [{"type": "text", "text": f"Unknown tool: {name}"}]
             }
         
-        await self.ensure_initialized()
-        
         url = arguments.get("url")
         context_id = arguments.get("context_id")
         timeout = arguments.get("timeout", 120)
@@ -98,8 +101,14 @@ class MCPServer:
             }
         
         try:
+            timeout = float(timeout)
+            if timeout <= 0:
+                raise URLValidationError("timeout must be positive")
+            safe_url = validate_target_url(url)
+            safe_context_id = validate_context_id(context_id)
+            await self.ensure_initialized()
             result = await asyncio.wait_for(
-                self.scraper.fetch(url, context_id=context_id),
+                self.scraper.fetch(safe_url, context_id=safe_context_id),
                 timeout=timeout
             )
             
@@ -127,6 +136,11 @@ class MCPServer:
                 "_metadata": result["metadata"]  # Include structured metadata
             }
             
+        except URLValidationError as e:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": str(e)}]
+            }
         except asyncio.TimeoutError:
             return {
                 "isError": True,
@@ -156,7 +170,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "ghostfetch",
-                        "version": "2026.3.25"
+                        "version": __version__
                     }
                 }
             
@@ -194,8 +208,7 @@ class MCPServer:
     
     async def run_stdio(self):
         """Run the MCP server using stdio transport."""
-        import sys
-        
+
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
@@ -206,22 +219,55 @@ class MCPServer:
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
         
         while True:
-            # Read message length header
+            try:
+                message = await self._read_framed_message(reader)
+                if message is None:
+                    return
+            except Exception:
+                continue
+
+            response = await self.handle_message(message)
+            if not response:
+                continue
+
+            writer.write(self._encode_framed_message(response))
+            await writer.drain()
+
+    @staticmethod
+    def _encode_framed_message(payload: Dict[str, Any]) -> bytes:
+        body = json.dumps(payload).encode("utf-8")
+        headers = (
+            f"Content-Length: {len(body)}\r\n"
+            "Content-Type: application/json\r\n\r\n"
+        ).encode("utf-8")
+        return headers + body
+
+    @staticmethod
+    async def _read_framed_message(reader: asyncio.StreamReader) -> Optional[Dict[str, Any]]:
+        headers: Dict[str, str] = {}
+        while True:
             line = await reader.readline()
             if not line:
+                return None
+            if line in (b"\r\n", b"\n"):
                 break
-            
-            try:
-                message = json.loads(line.decode().strip())
-            except json.JSONDecodeError:
-                continue
-            
-            response = await self.handle_message(message)
-            
-            if response:
-                response_bytes = (json.dumps(response) + "\n").encode()
-                writer.write(response_bytes)
-                await writer.drain()
+            decoded = line.decode("utf-8", errors="replace").strip()
+            if ":" in decoded:
+                key, value = decoded.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+
+        content_length = headers.get("content-length")
+        if not content_length:
+            raise ValueError("Missing content-length")
+
+        size = int(content_length)
+        if size <= 0:
+            raise ValueError("Invalid content-length")
+        if size > MAX_MCP_MESSAGE_SIZE:
+            raise ValueError(f"Message too large: {size} bytes (max {MAX_MCP_MESSAGE_SIZE})")
+
+        body = await reader.readexactly(size)
+        return json.loads(body.decode("utf-8"))
 
 
 async def main():

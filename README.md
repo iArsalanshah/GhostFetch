@@ -117,15 +117,22 @@ Start the server:
 ghostfetch serve
 ```
 
+By default, fetch endpoints require API key auth:
+```bash
+export GHOSTFETCH_API_KEY="replace-with-strong-token"
+```
+
 **Synchronous Fetch (Blocks until done):**
 ```bash
-curl "http://localhost:8000/fetch/sync?url=https://example.com"
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+  "http://localhost:8000/fetch/sync?url=https://example.com"
 ```
 
 **Asynchronous Fetch (Background Job):**
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
      -d '{"url": "https://example.com", "callback_url": "https://yourapp.com/webhook"}'
 ```
 
@@ -136,7 +143,8 @@ curl "http://localhost:8000/health"
 
 **Check Job Status:**
 ```bash
-curl "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+  "http://localhost:8000/job/a1b2c3d4-e5f6-7890"
 ```
 
 ### Response Format
@@ -169,10 +177,22 @@ GhostFetch is configured via environment variables.
 | `JITTER_MAX` | `7.0` | Maximum random wait time after page load |
 | `GHOSTFETCH_PORT` | `8000` | Port for the API server |
 | `PROXY_STRATEGY` | `round_robin` | `round_robin` or `random` |
+| `GHOSTFETCH_API_KEY` | _empty_ | Required API key for fetch endpoints when auth is enabled |
+| `REQUIRE_API_KEY` | `true` | Enable `X-API-Key` enforcement on fetch endpoints |
+| `BLOCK_PRIVATE_NETWORKS` | `true` | Blocks localhost/private IP targets to reduce SSRF risk |
+| `CALLBACK_ALLOWED_HOSTS` | _empty_ | Optional comma-separated callback host allowlist |
+| `CALLBACK_MAX_ATTEMPTS` | `3` | Max retries for webhook callback delivery |
+| `CALLBACK_RETRY_BASE_SECONDS` | `1.0` | Base delay used for exponential callback retry |
+| `GITHUB_TOKEN` | _empty_ | Token used for posting GitHub issue comments via API |
+| `LOG_FORMAT` | `text` | Set to `json` for structured logs |
+| `GHOSTFETCH_DEBUG` | `false` | Enables development reload mode when running `python main.py` |
 
 **Proxies:**
 Create a `proxies.txt` file in the working directory with one proxy per line:
 `http://user:pass@host:port`
+
+Concurrency note:
+`MAX_CONCURRENT_BROWSERS` is a global browser-context cap shared by both sync and async fetch paths.
 
 ---
 
