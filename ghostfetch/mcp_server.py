@@ -31,6 +31,8 @@ from src.utils.security import validate_target_url, URLValidationError
 from src.utils.security import validate_context_id
 from ghostfetch.version import __version__
 
+MAX_MCP_MESSAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+
 
 class MCPServer:
     """Simple MCP server implementation for GhostFetch."""
@@ -88,8 +90,6 @@ class MCPServer:
                 "content": [{"type": "text", "text": f"Unknown tool: {name}"}]
             }
         
-        await self.ensure_initialized()
-        
         url = arguments.get("url")
         context_id = arguments.get("context_id")
         timeout = arguments.get("timeout", 120)
@@ -102,10 +102,11 @@ class MCPServer:
         
         try:
             timeout = float(timeout)
-            if timeout < 0:
-                raise URLValidationError("timeout must be non-negative")
+            if timeout <= 0:
+                raise URLValidationError("timeout must be positive")
             safe_url = validate_target_url(url)
             safe_context_id = validate_context_id(context_id)
+            await self.ensure_initialized()
             result = await asyncio.wait_for(
                 self.scraper.fetch(safe_url, context_id=safe_context_id),
                 timeout=timeout
@@ -259,7 +260,13 @@ class MCPServer:
         if not content_length:
             raise ValueError("Missing content-length")
 
-        body = await reader.readexactly(int(content_length))
+        size = int(content_length)
+        if size <= 0:
+            raise ValueError("Invalid content-length")
+        if size > MAX_MCP_MESSAGE_SIZE:
+            raise ValueError(f"Message too large: {size} bytes (max {MAX_MCP_MESSAGE_SIZE})")
+
+        body = await reader.readexactly(size)
         return json.loads(body.decode("utf-8"))
 
 
