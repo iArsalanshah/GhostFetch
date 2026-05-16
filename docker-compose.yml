@@ -10,3 +10,4 @@ services:
     restart: always
     environment:
       - PYTHONUNBUFFERED=1
+      - GHOSTFETCH_API_KEY=${GHOSTFETCH_API_KEY}

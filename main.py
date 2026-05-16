@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, Header, Depends
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -6,16 +6,34 @@ import uvicorn
 import logging
 import json
 import asyncio
+from contextlib import asynccontextmanager
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from src.core.scraper import StealthScraper, ScraperError, logger
 from src.core.job_manager import JobManager
 from src.utils.config import settings
+from src.utils.security import validate_target_url, validate_callback_url, URLValidationError
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    logger.info("Starting Playwright browser and job manager...")
+    await scraper.start()
+    await job_manager.start()
+    logger.info("Browser and Job Manager started.")
+    try:
+        yield
+    finally:
+        logger.info("Stopping Playwright browser and job manager...")
+        await job_manager.stop()
+        await scraper.stop()
+        logger.info("Stopped.")
 
 app = FastAPI(
     title="GhostFetch API", 
     description="Stealthy headless browser API for AI agents. Fetches content from hard-to-scrape sites and converts to Markdown.",
     version="2026.3.25",
+    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -41,22 +59,26 @@ class SyncFetchRequest(BaseModel):
     )
 
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting Playwright browser and job manager...")
-    await scraper.start()
-    await job_manager.start()
-    logger.info("Browser and Job Manager started.")
+def _enforce_api_key(x_api_key: Optional[str] = Header(None)) -> None:
+    if not settings.REQUIRE_API_KEY:
+        return
+    if not settings.API_KEY:
+        raise HTTPException(status_code=503, detail="API key auth is enabled but GHOSTFETCH_API_KEY is not configured")
+    if x_api_key != settings.API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Stopping Playwright browser and job manager...")
-    await job_manager.stop()
-    await scraper.stop()
-    logger.info("Stopped.")
+
+def _normalize_success_response(url: str, result: dict) -> dict:
+    return {
+        "metadata": result.get("metadata", {}),
+        "markdown": result.get("markdown", ""),
+        "url": url,
+        "status": "success",
+    }
+
 
 @app.post("/fetch", status_code=202)
-async def fetch_endpoint(request: FetchRequest):
+async def fetch_endpoint(request: FetchRequest, _: None = Depends(_enforce_api_key)):
     """
     Submit a fetch job (async). Returns a job ID immediately.
     
@@ -66,20 +88,24 @@ async def fetch_endpoint(request: FetchRequest):
     For synchronous fetching, use POST /fetch/sync instead.
     """
     try:
+        url = validate_target_url(request.url)
+        callback_url = validate_callback_url(request.callback_url)
         job_id = await job_manager.submit_job(
-            request.url, 
+            url,
             context_id=request.context_id,
-            callback_url=request.callback_url, 
+            callback_url=callback_url,
             github_issue=request.github_issue
         )
-        return {"job_id": job_id, "url": request.url, "status": "queued"}
+        return {"job_id": job_id, "url": url, "status": "queued"}
+    except URLValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Error submitting job")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/fetch/sync", status_code=200)
-async def fetch_sync_endpoint(request: SyncFetchRequest):
+async def fetch_sync_endpoint(request: SyncFetchRequest, _: None = Depends(_enforce_api_key)):
     """
     Fetch a URL synchronously - blocks until content is ready.
     
@@ -97,12 +123,13 @@ async def fetch_sync_endpoint(request: SyncFetchRequest):
     """
     # Use default timeout if not specified, cap at max allowed
     timeout = request.timeout if request.timeout is not None else settings.SYNC_TIMEOUT_DEFAULT
-    timeout = min(timeout, settings.MAX_SYNC_TIMEOUT)
+    timeout = min(max(timeout, 1), settings.MAX_SYNC_TIMEOUT)
     
     try:
+        url = validate_target_url(request.url)
         # Direct fetch with timeout
         result = await asyncio.wait_for(
-            scraper.fetch(request.url, context_id=request.context_id),
+            scraper.fetch(url, context_id=request.context_id),
             timeout=timeout
         )
         
@@ -112,7 +139,7 @@ async def fetch_sync_endpoint(request: SyncFetchRequest):
                 detail="No content could be fetched from the URL"
             )
         
-        return result
+        return _normalize_success_response(url, result)
         
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -122,6 +149,8 @@ async def fetch_sync_endpoint(request: SyncFetchRequest):
     except ScraperError as e:
         status_code = 502 if e.retryable else 400
         raise HTTPException(status_code=status_code, detail=e.message)
+    except URLValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Error in sync fetch")
         raise HTTPException(status_code=500, detail=str(e))
@@ -134,7 +163,8 @@ async def fetch_sync_get_endpoint(
     timeout: Optional[float] = Query(
         None, 
         description=f"Maximum time to wait in seconds (default: {settings.SYNC_TIMEOUT_DEFAULT}, max: {settings.MAX_SYNC_TIMEOUT})"
-    )
+    ),
+    _: None = Depends(_enforce_api_key)
 ):
     """
     Fetch a URL synchronously via GET request.

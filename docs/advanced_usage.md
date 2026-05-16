@@ -12,6 +12,7 @@ Add the `github_issue` parameter to your request:
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
      -d '{
            "url": "https://example.com",
            "github_issue": 42
@@ -64,6 +65,7 @@ For high-volume scraping, we recommend using Docker Compose with environment var
 
 Create a `.env` file:
 ```bash
+GHOSTFETCH_API_KEY=replace-with-strong-token
 MAX_CONCURRENT_BROWSERS=4
 MIN_DOMAIN_DELAY=5
 GITHUB_REPO=your-org/your-repo

@@ -38,13 +38,21 @@ class JobManager:
         self.scraper = scraper
         self.queue = asyncio.Queue()
         self.workers = []
+        self.cleanup_task: Optional[asyncio.Task] = None
         self.subscribers: List[asyncio.Queue] = []
         self._init_db()
+
+    def _connect_db(self):
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
 
     def _init_db(self):
         os.makedirs(settings.STORAGE_DIR, exist_ok=True)
         self.db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
@@ -63,7 +71,7 @@ class JobManager:
             """)
 
     def _save_job(self, job: Job):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs 
                 (id, url, context_id, callback_url, github_issue, status, result, error, error_details, created_at, started_at, completed_at)
@@ -91,7 +99,7 @@ class JobManager:
             self.subscribers.remove(q)
 
     def _get_job_from_db(self, job_id: str) -> Optional[Job]:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect_db() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if row:
@@ -105,13 +113,18 @@ class JobManager:
         for _ in range(settings.MAX_CONCURRENT_BROWSERS):
             worker = asyncio.create_task(self._worker())
             self.workers.append(worker)
-        asyncio.create_task(self._cleanup_task())
+        self.cleanup_task = asyncio.create_task(self._cleanup_task())
         logger.info(f"Started {settings.MAX_CONCURRENT_BROWSERS} workers and cleanup task.")
 
     async def stop(self):
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
+        self.workers.clear()
+        if self.cleanup_task:
+            self.cleanup_task.cancel()
+            await asyncio.gather(self.cleanup_task, return_exceptions=True)
+            self.cleanup_task = None
         logger.info("Stopped workers.")
 
     async def submit_job(self, url: str, context_id: Optional[str] = None, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
@@ -156,7 +169,12 @@ class JobManager:
                                 retryable=True,
                             )
                         
-                        job.result = result
+                        job.result = {
+                            "metadata": result.get("metadata", {}),
+                            "markdown": result.get("markdown", ""),
+                            "url": job.url,
+                            "status": "success",
+                        }
                         job.status = "completed"
                         job.error = None
                         job.error_details = None
@@ -211,7 +229,8 @@ class JobManager:
                 "error": job.error,
                 "error_details": job.error_details
             }
-            requests.post(job.callback_url, json=payload, timeout=10)
+            response = requests.post(job.callback_url, json=payload, timeout=10)
+            response.raise_for_status()
             logger.info(f"Callback sent for job {job.id} to {job.callback_url}")
         except Exception as e:
             logger.error(f"Failed to send callback for job {job.id}: {e}")
@@ -240,7 +259,7 @@ class JobManager:
         while True:
             try:
                 cutoff = time.time() - settings.JOB_TTL_SECONDS
-                with sqlite3.connect(self.db_path) as conn:
+                with self._connect_db() as conn:
                     conn.execute("DELETE FROM jobs WHERE completed_at IS NOT NULL AND completed_at < ?", (cutoff,))
                 logger.debug("Cleaned up old jobs from database.")
             except Exception as e:

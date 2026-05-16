@@ -117,15 +117,22 @@ Start the server:
 ghostfetch serve
 ```
 
+By default, fetch endpoints require API key auth:
+```bash
+export GHOSTFETCH_API_KEY="replace-with-strong-token"
+```
+
 **Synchronous Fetch (Blocks until done):**
 ```bash
-curl "http://localhost:8000/fetch/sync?url=https://example.com"
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+  "http://localhost:8000/fetch/sync?url=https://example.com"
 ```
 
 **Asynchronous Fetch (Background Job):**
 ```bash
 curl -X POST "http://localhost:8000/fetch" \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
      -d '{"url": "https://example.com", "callback_url": "https://yourapp.com/webhook"}'
 ```
 
@@ -169,6 +176,10 @@ GhostFetch is configured via environment variables.
 | `JITTER_MAX` | `7.0` | Maximum random wait time after page load |
 | `GHOSTFETCH_PORT` | `8000` | Port for the API server |
 | `PROXY_STRATEGY` | `round_robin` | `round_robin` or `random` |
+| `GHOSTFETCH_API_KEY` | _empty_ | Required API key for fetch endpoints when auth is enabled |
+| `REQUIRE_API_KEY` | `true` | Enable `X-API-Key` enforcement on fetch endpoints |
+| `BLOCK_PRIVATE_NETWORKS` | `true` | Blocks localhost/private IP targets to reduce SSRF risk |
+| `CALLBACK_ALLOWED_HOSTS` | _empty_ | Optional comma-separated callback host allowlist |
 
 **Proxies:**
 Create a `proxies.txt` file in the working directory with one proxy per line:

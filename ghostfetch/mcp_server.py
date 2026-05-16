@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional
 # Add parent directory for imports
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils.security import validate_target_url, URLValidationError
 
 
 class MCPServer:
@@ -98,8 +99,9 @@ class MCPServer:
             }
         
         try:
+            safe_url = validate_target_url(url)
             result = await asyncio.wait_for(
-                self.scraper.fetch(url, context_id=context_id),
+                self.scraper.fetch(safe_url, context_id=context_id),
                 timeout=timeout
             )
             
@@ -127,6 +129,11 @@ class MCPServer:
                 "_metadata": result["metadata"]  # Include structured metadata
             }
             
+        except URLValidationError as e:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": str(e)}]
+            }
         except asyncio.TimeoutError:
             return {
                 "isError": True,
@@ -194,8 +201,7 @@ class MCPServer:
     
     async def run_stdio(self):
         """Run the MCP server using stdio transport."""
-        import sys
-        
+
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
@@ -206,22 +212,39 @@ class MCPServer:
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
         
         while True:
-            # Read message length header
-            line = await reader.readline()
-            if not line:
-                break
-            
-            try:
-                message = json.loads(line.decode().strip())
-            except json.JSONDecodeError:
+            headers: Dict[str, str] = {}
+            while True:
+                line = await reader.readline()
+                if not line:
+                    return
+                if line in (b"\r\n", b"\n"):
+                    break
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if ":" in decoded:
+                    key, value = decoded.split(":", 1)
+                    headers[key.strip().lower()] = value.strip()
+
+            content_length = headers.get("content-length")
+            if not content_length:
                 continue
-            
+
+            try:
+                body = await reader.readexactly(int(content_length))
+                message = json.loads(body.decode("utf-8"))
+            except Exception:
+                continue
+
             response = await self.handle_message(message)
-            
-            if response:
-                response_bytes = (json.dumps(response) + "\n").encode()
-                writer.write(response_bytes)
-                await writer.drain()
+            if not response:
+                continue
+
+            response_body = json.dumps(response).encode("utf-8")
+            response_headers = (
+                f"Content-Length: {len(response_body)}\r\n"
+                "Content-Type: application/json\r\n\r\n"
+            ).encode("utf-8")
+            writer.write(response_headers + response_body)
+            await writer.drain()
 
 
 async def main():

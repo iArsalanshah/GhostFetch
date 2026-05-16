@@ -31,6 +31,21 @@ class Settings:
     PROXIES_FILE = os.getenv("PROXIES_FILE", "proxies.txt")
     PROXY_STRATEGY = os.getenv("PROXY_STRATEGY", "round_robin") # round_robin or random
 
+    # Security Settings
+    API_KEY = os.getenv("GHOSTFETCH_API_KEY", "").strip()
+    REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "true").strip().lower() in ("1", "true", "yes")
+    ALLOWED_URL_SCHEMES = tuple(
+        s.strip().lower()
+        for s in os.getenv("ALLOWED_URL_SCHEMES", "http,https").split(",")
+        if s.strip()
+    )
+    BLOCK_PRIVATE_NETWORKS = os.getenv("BLOCK_PRIVATE_NETWORKS", "true").strip().lower() in ("1", "true", "yes")
+    CALLBACK_ALLOWED_HOSTS = tuple(
+        h.strip().lower()
+        for h in os.getenv("CALLBACK_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    )
+
     def get_proxies(self):
         if not os.path.exists(self.PROXIES_FILE):
             return []
