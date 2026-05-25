@@ -1,3 +1,5 @@
+![GhostFetch Banner](docs/banner.png)
+
 # GhostFetch
 
 [![PyPI version](https://img.shields.io/pypi/v/ghostfetch?color=blue)](https://pypi.org/project/ghostfetch/)
