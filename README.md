@@ -1,22 +1,27 @@
+![GhostFetch Banner](docs/banner.png)
+
 # GhostFetch
 
 [![PyPI version](https://img.shields.io/pypi/v/ghostfetch?color=blue)](https://pypi.org/project/ghostfetch/)
 [![Docker Hub](https://img.shields.io/docker/pulls/iarsalanshah/ghostfetch)](https://hub.docker.com/r/iarsalanshah/ghostfetch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**A stealthy, headless browser service for AI agents.**
+**Fetch the unfetchable.** A stealthy, headless browser service for AI agents.
 
-GhostFetch bypasses anti-bot protections to fetch content from difficult sites (like X.com) and converts it into clean, LLM-ready Markdown. It handles the complexity of headless browsing, proxy rotation, and fingerprinting so your agent doesn't have to.
+GhostFetch bypasses anti-bot protections to fetch content from difficult sites (like X.com and LinkedIn) and converts it into clean, LLM-ready Markdown. It handles the complexity of headless browsing, proxy rotation, and fingerprinting so your agent doesn't have to.
+
+*Powered by the 🦊 Phantom Fox — slipping past every wall, unseen.*
 
 ## Why GhostFetch?
 
 Fetching content for AI agents is hard. Simple `requests` or `curl` calls fail on modern sites due to JavaScript rendering and anti-bot checks. Heavy browser automation tools are slow and complex to manage.
 
 GhostFetch solves this by providing:
-*   **Stealth by Design**: "Ghost Protocol" fingerprinting to mimic real users.
-*   **LLM-Native Output**: Returns clean Markdown, not messy HTML.
-*   **Smart Scrolling**: Automatically expands infinite feeds (perfect for X/Twitter threads).
-*   **Zero-Config**: Browsers auto-install and manage themselves.
+*   🦊 **Stealth by Design**: "Ghost Protocol" fingerprinting to mimic real users.
+*   📜 **LLM-Native Output**: Returns clean Markdown, not messy HTML.
+*   📜 **Smart Scrolling**: Automatically expands infinite feeds (perfect for X/Twitter threads).
+*   🔐 **Authenticated Sessions**: Bypass login walls for LinkedIn, X/Twitter, and other gated sites.
+*   ⚡ **Zero-Config**: Browsers auto-install and manage themselves.
 
 ### Architecture
 
@@ -47,18 +52,28 @@ ghostfetch "https://x.com/user/status/123"
 }
 ```
 
+### 3. Fetch Behind a Login Wall (LinkedIn, etc.)
+```bash
+# Open a visible browser to log in — session is saved for reuse
+ghostfetch auth login --domain linkedin.com --login-url https://www.linkedin.com/login
+
+# Fetch content using the saved session
+ghostfetch "https://www.linkedin.com/in/profile" --auth-session-id <SESSION_ID>
+```
+
 ---
 
 ## ✨ Features
 
-*   **Synchronous & Async API**: Flexible integration patterns.
-*   **Ghost Protocol**: Advanced proxy rotation and cohesive browser fingerprinting.
-*   **Smart Scrolling**: Auto-detects and scrolls infinite feeds to capture full content.
-*   **X.com Optimized**: Special handling for Twitter/X hydration and thread expansion.
-*   **Metadata Extraction**: Auto-extracts title, author, date, and images.
-*   **Job Queue**: Built-in async job system with webhooks and retries.
-*   **Persistent Sessions**: Cookie/localStorage persistence per domain.
-*   **Docker Ready**: Production-ready container images included.
+*   ⚡ **Synchronous & Async API**: Flexible integration patterns.
+*   🦊 **Ghost Protocol**: Advanced proxy rotation and cohesive browser fingerprinting.
+*   📜 **Smart Scrolling**: Auto-detects and scrolls infinite feeds to capture full content.
+*   🐦 **X.com Optimized**: Special handling for Twitter/X hydration and thread expansion.
+*   🔍 **Metadata Extraction**: Auto-extracts title, author, date, and images.
+*   📬 **Job Queue**: Built-in async job system with webhooks and retries.
+*   🍪 **Persistent Sessions**: Cookie/localStorage persistence per domain.
+*   🔐 **Authenticated Sessions**: Domain-locked session management for login-gated pages (LinkedIn, X, etc.).
+*   🐳 **Docker Ready**: Production-ready container images included.
 
 ---
 
@@ -100,13 +115,26 @@ ghostfetch "https://example.com" --json
 
 # Metadata only
 ghostfetch "https://example.com" --metadata-only
+
+# Fetch behind a login wall
+ghostfetch "https://linkedin.com/in/profile" --auth-session-id abc123
+
+# Manage authenticated sessions
+ghostfetch auth login --domain linkedin.com
+ghostfetch auth status
+ghostfetch auth revoke <SESSION_ID>
 ```
 
 ### Python SDK
 ```python
 from ghostfetch import fetch
 
+# Simple fetch
 result = fetch("https://example.com")
+print(result['markdown'])
+
+# Fetch behind a login wall
+result = fetch("https://linkedin.com/in/profile", auth_session_id="abc123")
 print(result['markdown'])
 ```
 
@@ -136,6 +164,34 @@ curl -X POST "http://localhost:8000/fetch" \
      -d '{"url": "https://example.com", "callback_url": "https://yourapp.com/webhook"}'
 ```
 
+**Fetch with Authenticated Session:**
+```bash
+curl -X POST "http://localhost:8000/fetch/sync" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+     -d '{"url": "https://linkedin.com/in/profile", "auth_session_id": "abc123"}'
+```
+
+**Import an Auth Session (programmatic):**
+```bash
+curl -X POST "http://localhost:8000/auth/sessions/import" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+     -d '{"domain": "linkedin.com", "storage_state": {...}, "ttl_seconds": 86400}'
+```
+
+**List Auth Sessions:**
+```bash
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+  "http://localhost:8000/auth/sessions"
+```
+
+**Revoke an Auth Session:**
+```bash
+curl -X DELETE "http://localhost:8000/auth/sessions/abc123" \
+  -H "X-API-Key: $GHOSTFETCH_API_KEY"
+```
+
 **Check Health:**
 ```bash
 curl "http://localhost:8000/health"
@@ -163,6 +219,11 @@ All successful fetches return a standardized JSON structure:
 }
 ```
 
+**Auth Wall Detection:** When fetching login-gated pages without a valid session, the response status will be one of:
+*   `auth_required` — The page requires a login.
+*   `auth_expired` — The saved session has expired.
+*   `auth_challenge` — An additional security challenge (e.g., CAPTCHA) was encountered.
+
 ---
 
 ## 📊 Configuration
@@ -186,6 +247,7 @@ GhostFetch is configured via environment variables.
 | `GITHUB_TOKEN` | _empty_ | Token used for posting GitHub issue comments via API |
 | `LOG_FORMAT` | `text` | Set to `json` for structured logs |
 | `GHOSTFETCH_DEBUG` | `false` | Enables development reload mode when running `python main.py` |
+| `STORAGE_DIR` | `storage` | Directory for persistent sessions, auth sessions, and logs |
 
 **Proxies:**
 Create a `proxies.txt` file in the working directory with one proxy per line:

@@ -55,6 +55,111 @@ This exposes a `ghostfetch` tool to the agent:
 
 ---
 
+## 🔐 Authenticated Sessions
+
+GhostFetch can fetch content behind login walls (LinkedIn, X/Twitter, private forums) using **domain-locked authenticated sessions**. Sessions are saved Playwright browser storage states, bound to a specific domain, and expire automatically via TTL.
+
+### CLI Workflow
+
+The easiest way to create a session is via the interactive CLI login:
+
+```bash
+# Opens a visible browser for manual login — session is saved for reuse
+ghostfetch auth login --domain linkedin.com --login-url https://www.linkedin.com/login
+
+# Fetch content using the saved session
+ghostfetch "https://www.linkedin.com/in/profile" --auth-session-id <SESSION_ID>
+
+# List active sessions
+ghostfetch auth status
+
+# Revoke a session
+ghostfetch auth revoke <SESSION_ID>
+```
+
+### REST API Workflow
+
+**Import a session programmatically** (e.g., from an existing Playwright storage state):
+```bash
+curl -X POST "http://localhost:8000/auth/sessions/import" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+     -d '{
+       "domain": "linkedin.com",
+       "storage_state": { "cookies": [...], "origins": [...] },
+       "session_id": "my-linkedin-session",
+       "ttl_seconds": 86400
+     }'
+```
+
+**Fetch with a session:**
+```bash
+curl -X POST "http://localhost:8000/fetch/sync" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $GHOSTFETCH_API_KEY" \
+     -d '{
+       "url": "https://www.linkedin.com/in/profile",
+       "auth_session_id": "my-linkedin-session"
+     }'
+```
+
+**List and revoke sessions:**
+```bash
+curl -H "X-API-Key: $GHOSTFETCH_API_KEY" "http://localhost:8000/auth/sessions"
+curl -X DELETE "http://localhost:8000/auth/sessions/my-linkedin-session" \
+  -H "X-API-Key: $GHOSTFETCH_API_KEY"
+```
+
+### Python SDK Workflow
+
+```python
+from ghostfetch import fetch, GhostFetchClient
+
+# Using the simple fetch function
+result = fetch("https://linkedin.com/in/profile", auth_session_id="my-linkedin-session")
+print(result["markdown"])
+
+# Using the GhostFetchClient
+client = GhostFetchClient("http://localhost:8000", api_key="your-api-key")
+
+# Import a session from an existing storage state
+client.import_auth_session(
+    domain="linkedin.com",
+    storage_state={"cookies": [...], "origins": [...]},
+    session_id="my-linkedin-session",
+    ttl_seconds=86400,
+)
+
+# Fetch with the session
+result = client.fetch_sync(
+    "https://linkedin.com/in/profile",
+    auth_session_id="my-linkedin-session",
+)
+print(result["markdown"])
+```
+
+### Domain Binding
+
+Sessions are **locked to their auth domain**. If you create a session for `linkedin.com`, GhostFetch will reject attempts to use it for `x.com`. This prevents accidental credential leakage across unrelated sites.
+
+### Auth Wall Detection
+
+When fetching a login-gated page without a valid session, GhostFetch returns structured status codes instead of garbage markup:
+
+| Status | Meaning |
+| :--- | :--- |
+| `auth_required` | The page requires a login. |
+| `auth_expired` | The saved session has expired or been invalidated. |
+| `auth_challenge` | An additional security challenge (e.g., CAPTCHA, 2FA) was encountered. |
+
+### Security Notes
+
+*   Auth endpoints require API key authentication (`REQUIRE_API_KEY=true`).
+*   Session files are stored under `STORAGE_DIR/auth_sessions/` and may contain sensitive cookies. Keep `STORAGE_DIR` on a private filesystem with restricted access.
+*   Sessions are validated against `BLOCK_PRIVATE_NETWORKS` — you cannot use auth sessions to reach internal IPs.
+
+---
+
 ## Production Deployment
 
 ### Docker Recommended Setup
