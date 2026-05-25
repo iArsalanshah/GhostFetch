@@ -11,6 +11,9 @@ import asyncio
 import sys
 import os
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
+from src.auth_session import auth_session_store
+from src.utils.security import URLValidationError
 
 # Add parent directory to path so we can import src modules
 _package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,7 +21,12 @@ if _package_dir not in sys.path:
     sys.path.insert(0, _package_dir)
 
 
-async def fetch_async(url: str, context_id: Optional[str] = None, timeout: float = 120.0) -> Dict[str, Any]:
+async def fetch_async(
+    url: str,
+    context_id: Optional[str] = None,
+    auth_session_id: Optional[str] = None,
+    timeout: float = 120.0,
+) -> Dict[str, Any]:
     """
     Fetch a URL asynchronously and return structured content.
     
@@ -43,11 +51,19 @@ async def fetch_async(url: str, context_id: Optional[str] = None, timeout: float
         asyncio.run(main())
     """
     from src.core.scraper import StealthScraper
+    auth_storage_state_path = None
+    if auth_session_id:
+        session = auth_session_store.get_session(auth_session_id)
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        if host != session.domain and not host.endswith(f".{session.domain}"):
+            raise URLValidationError("URL host does not match auth session domain")
+        auth_session_store.mark_used(auth_session_id)
+        auth_storage_state_path = session.storage_state_path
     
     scraper = StealthScraper()
     try:
         result = await asyncio.wait_for(
-            scraper.fetch(url, context_id=context_id),
+            scraper.fetch(url, context_id=context_id, auth_storage_state_path=auth_storage_state_path),
             timeout=timeout
         )
         if not result:
@@ -62,7 +78,12 @@ async def fetch_async(url: str, context_id: Optional[str] = None, timeout: float
         await scraper.stop()
 
 
-def fetch(url: str, context_id: Optional[str] = None, timeout: float = 120.0) -> Dict[str, Any]:
+def fetch(
+    url: str,
+    context_id: Optional[str] = None,
+    auth_session_id: Optional[str] = None,
+    timeout: float = 120.0,
+) -> Dict[str, Any]:
     """
     Fetch a URL synchronously and return structured content.
     
@@ -85,10 +106,15 @@ def fetch(url: str, context_id: Optional[str] = None, timeout: float = 120.0) ->
         print(result["metadata"]["title"])
         print(result["markdown"])
     """
-    return asyncio.run(fetch_async(url, context_id=context_id, timeout=timeout))
+    return asyncio.run(fetch_async(url, context_id=context_id, auth_session_id=auth_session_id, timeout=timeout))
 
 
-def fetch_markdown(url: str, context_id: Optional[str] = None, timeout: float = 120.0) -> str:
+def fetch_markdown(
+    url: str,
+    context_id: Optional[str] = None,
+    auth_session_id: Optional[str] = None,
+    timeout: float = 120.0,
+) -> str:
     """
     Fetch a URL and return only the markdown content.
     
@@ -106,5 +132,5 @@ def fetch_markdown(url: str, context_id: Optional[str] = None, timeout: float = 
         markdown = fetch_markdown("https://example.com")
         print(markdown)
     """
-    result = fetch(url, context_id=context_id, timeout=timeout)
+    result = fetch(url, context_id=context_id, auth_session_id=auth_session_id, timeout=timeout)
     return result.get("markdown", "")

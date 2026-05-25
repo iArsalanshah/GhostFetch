@@ -53,7 +53,8 @@ class GhostFetchClient:
         self, 
         url: str, 
         timeout: float = 120.0,
-        context_id: Optional[str] = None
+        context_id: Optional[str] = None,
+        auth_session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Fetch a URL synchronously - blocks until the content is ready.
@@ -76,7 +77,8 @@ class GhostFetchClient:
         """
         payload = {
             "url": url,
-            "context_id": context_id
+            "context_id": context_id,
+            "auth_session_id": auth_session_id,
         }
         response = self.session.post(
             f"{self.base_url}/fetch/sync",
@@ -90,6 +92,7 @@ class GhostFetchClient:
         self, 
         url: str, 
         context_id: Optional[str] = None, 
+        auth_session_id: Optional[str] = None,
         callback_url: Optional[str] = None, 
         github_issue: Optional[int] = None
     ) -> str:
@@ -111,12 +114,40 @@ class GhostFetchClient:
         payload = {
             "url": url,
             "context_id": context_id,
+            "auth_session_id": auth_session_id,
             "callback_url": callback_url,
             "github_issue": github_issue
         }
         response = self.session.post(f"{self.base_url}/fetch", json=payload)
         response.raise_for_status()
         return response.json()["job_id"]
+
+    def import_auth_session(
+        self,
+        domain: str,
+        storage_state: Dict[str, Any],
+        session_id: Optional[str] = None,
+        ttl_seconds: int = 86400,
+    ) -> Dict[str, Any]:
+        payload = {
+            "domain": domain,
+            "storage_state": storage_state,
+            "session_id": session_id,
+            "ttl_seconds": ttl_seconds,
+        }
+        response = self.session.post(f"{self.base_url}/auth/sessions/import", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def list_auth_sessions(self) -> Dict[str, Any]:
+        response = self.session.get(f"{self.base_url}/auth/sessions")
+        response.raise_for_status()
+        return response.json()
+
+    def revoke_auth_session(self, session_id: str) -> Dict[str, Any]:
+        response = self.session.delete(f"{self.base_url}/auth/sessions/{session_id}")
+        response.raise_for_status()
+        return response.json()
 
     def get_job(self, job_id: str) -> Dict[str, Any]:
         """

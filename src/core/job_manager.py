@@ -9,10 +9,14 @@ from typing import Dict, Optional, List
 import random
 import httpx
 from pydantic import BaseModel
+from urllib.parse import urlparse
 from src.utils.config import settings
+from src.auth_session import auth_session_store
+from src.utils.security import URLValidationError
 from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger("GhostFetch.JobManager")
+AUTH_STATUSES = {"auth_required", "auth_expired", "auth_challenge"}
 
 # Prometheus Metrics
 JOBS_TOTAL = Counter("ghostfetch_jobs_total", "Total number of jobs processed", ["status"])
@@ -24,6 +28,7 @@ class Job(BaseModel):
     id: str
     url: str
     context_id: Optional[str] = None
+    auth_session_id: Optional[str] = None
     callback_url: Optional[str] = None
     github_issue: Optional[int] = None
     status: str = "queued"
@@ -60,6 +65,7 @@ class JobManager:
                     id TEXT PRIMARY KEY,
                     url TEXT,
                     context_id TEXT,
+                    auth_session_id TEXT,
                     callback_url TEXT,
                     github_issue INTEGER,
                     status TEXT,
@@ -75,15 +81,17 @@ class JobManager:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             if "callback_status" not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN callback_status TEXT")
+            if "auth_session_id" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN auth_session_id TEXT")
 
     def _save_job(self, job: Job):
         with self._connect_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs 
-                (id, url, context_id, callback_url, github_issue, status, result, error, error_details, callback_status, created_at, started_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, url, context_id, auth_session_id, callback_url, github_issue, status, result, error, error_details, callback_status, created_at, started_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                job.id, job.url, job.context_id, job.callback_url, job.github_issue, job.status,
+                job.id, job.url, job.context_id, job.auth_session_id, job.callback_url, job.github_issue, job.status,
                 json.dumps(job.result) if job.result else None,
                 job.error,
                 json.dumps(job.error_details) if job.error_details else None,
@@ -134,13 +142,21 @@ class JobManager:
             self.cleanup_task = None
         logger.info("Stopped workers.")
 
-    async def submit_job(self, url: str, context_id: Optional[str] = None, callback_url: Optional[str] = None, github_issue: Optional[int] = None) -> str:
+    async def submit_job(
+        self,
+        url: str,
+        context_id: Optional[str] = None,
+        auth_session_id: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        github_issue: Optional[int] = None,
+    ) -> str:
         job_id = str(uuid.uuid4())
         callback_status = "pending" if callback_url else "not_configured"
         job = Job(
             id=job_id,
             url=url,
             context_id=context_id,
+            auth_session_id=auth_session_id,
             callback_url=callback_url,
             github_issue=github_issue,
             callback_status=callback_status,
@@ -176,7 +192,20 @@ class JobManager:
                         logger.info(f"Worker processing job {job_id} for {job.url} (Attempt {attempt+1})")
                         
                         with JOB_DURATION.time():
-                            result = await self.scraper.fetch(job.url, context_id=job.context_id)
+                            auth_storage_state_path = None
+                            if job.auth_session_id:
+                                auth_session = auth_session_store.get_session(job.auth_session_id)
+                                host = (urlparse(job.url).hostname or "").lower().rstrip(".")
+                                if host != auth_session.domain and not host.endswith(f".{auth_session.domain}"):
+                                    raise URLValidationError("URL host does not match auth session domain")
+                                auth_session_store.mark_used(job.auth_session_id)
+                                auth_storage_state_path = auth_session.storage_state_path
+
+                            result = await self.scraper.fetch(
+                                job.url,
+                                context_id=job.context_id,
+                                auth_storage_state_path=auth_storage_state_path,
+                            )
 
                         if not result or not isinstance(result, dict):
                             raise ScraperError(
@@ -200,6 +229,17 @@ class JobManager:
                         logger.error(f"Scraper error for job {job_id}: {e.message}")
                         job.error = e.message
                         job.error_details = {"code": e.error_code, "retryable": e.retryable}
+                        if e.error_code in AUTH_STATUSES:
+                            job.result = {
+                                "metadata": {},
+                                "markdown": "",
+                                "url": job.url,
+                                "status": e.error_code,
+                                "message": e.message,
+                            }
+                            job.status = "completed"
+                            JOBS_TOTAL.labels(status="completed").inc()
+                            break
                         
                         if e.retryable and attempt < settings.MAX_RETRIES:
                             attempt += 1

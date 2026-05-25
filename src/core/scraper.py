@@ -113,7 +113,12 @@ class StealthScraper:
             await self.playwright.stop()
             self.playwright = None
 
-    async def fetch(self, url: str, context_id: Optional[str] = None):
+    async def fetch(
+        self,
+        url: str,
+        context_id: Optional[str] = None,
+        auth_storage_state_path: Optional[str] = None,
+    ):
         # Re-validate user-controlled values at execution time to reduce TOCTOU risk.
         safe_url = validate_target_url(url)
         safe_context_id = validate_context_id(context_id)
@@ -142,7 +147,9 @@ class StealthScraper:
             self.last_fetch[domain] = time.time()
             
             # Storage path: uses context_id if provided, otherwise domain-based
-            if safe_context_id:
+            if auth_storage_state_path:
+                storage_path = auth_storage_state_path
+            elif safe_context_id:
                 storage_path = context_storage_path(settings.STORAGE_DIR, safe_context_id)
             else:
                 storage_path = os.path.join(settings.STORAGE_DIR, f"cookies_{domain}.json")
@@ -267,8 +274,45 @@ class StealthScraper:
                 await context.close()
 
             if content:
+                self._raise_if_auth_wall(page_url=page.url, html_content=content)
                 return self._parse_content(content)
             return ""
+
+    def _raise_if_auth_wall(self, page_url: str, html_content: str) -> None:
+        lower_url = page_url.lower()
+        lower_html = html_content.lower()
+        parsed = urlparse(lower_url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path or "/"
+
+        # Strong URL signals first; avoid broad text-only matching (e.g. LinkedIn footer copy).
+        is_login_page = any(token in path for token in ["/login", "/signin", "/checkpoint", "/challenge"])
+        has_session_expired_signal = "session has expired" in lower_html or "expired" in path
+        has_challenge_signal = any(
+            token in lower_html for token in ["verification code", "security challenge", "captcha"]
+        )
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        has_password_input = bool(soup.select('input[type="password"]'))
+        linkedin_login_form = bool(
+            soup.select('form[action*="/checkpoint"]')
+            or soup.select('input[name="session_key"]')
+            or soup.select('input[name="session_password"]')
+        )
+
+        # LinkedIn-specific guard: ignore "Join LinkedIn" / "Sign in" footer text unless
+        # we also have strong login form or login-path evidence.
+        if "linkedin.com" in host:
+            has_auth_required_signal = is_login_page or linkedin_login_form or (has_password_input and "/login" in path)
+        else:
+            has_auth_required_signal = is_login_page or has_password_input
+
+        if has_session_expired_signal:
+            raise ScraperError("Authenticated session expired", "auth_expired", retryable=False)
+        if has_challenge_signal:
+            raise ScraperError("Authentication challenge encountered", "auth_challenge", retryable=False)
+        if has_auth_required_signal:
+            raise ScraperError("Authentication required", "auth_required", retryable=False)
 
     def _parse_content(self, html_content):
         soup = BeautifulSoup(html_content, "html.parser")

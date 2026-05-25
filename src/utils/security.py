@@ -84,6 +84,15 @@ def _validate_host(hostname: Optional[str], *, block_private: bool) -> None:
             raise URLValidationError("Resolved host points to private or restricted IP space")
 
 
+def validate_domain_host(domain: str) -> str:
+    if not isinstance(domain, str) or not domain.strip():
+        raise URLValidationError("domain is required")
+
+    host = domain.strip().lower().rstrip(".")
+    _validate_host(host, block_private=settings.BLOCK_PRIVATE_NETWORKS)
+    return host
+
+
 def validate_target_url(url: str) -> str:
     if not isinstance(url, str) or not url.strip():
         raise URLValidationError("URL is required")

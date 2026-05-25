@@ -17,7 +17,10 @@ import subprocess
 import sys
 import os
 from typing import Optional
+from urllib.parse import urlparse
 from ghostfetch.version import __version__
+from src.auth_session import auth_session_store
+from src.utils.security import URLValidationError, validate_domain_host
 
 
 def install_browsers(quiet: bool = False) -> bool:
@@ -71,22 +74,43 @@ def ensure_browsers_installed(quiet: bool = False) -> bool:
 
 
 
-async def fetch_url(url: str, output_format: str = "markdown") -> dict:
+async def fetch_url(
+    url: str,
+    output_format: str = "markdown",
+    auth_storage_state_path: Optional[str] = None,
+) -> dict:
     """Fetch a URL and return the content."""
     # Import here to avoid slow startup for --help
     from src.core.scraper import StealthScraper
     
     scraper = StealthScraper()
     try:
-        result = await scraper.fetch(url)
+        result = await scraper.fetch(url, auth_storage_state_path=auth_storage_state_path)
         return result
     finally:
         await scraper.stop()
 
 
-def run_fetch(url: str, output_format: str = "markdown", metadata_only: bool = False):
+def _resolve_cli_auth_storage(url: str, auth_session_id: Optional[str]) -> Optional[str]:
+    if not auth_session_id:
+        return None
+    session = auth_session_store.get_session(auth_session_id)
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if host != session.domain and not host.endswith(f".{session.domain}"):
+        raise URLValidationError("URL host does not match auth session domain")
+    auth_session_store.mark_used(auth_session_id)
+    return session.storage_state_path
+
+
+def run_fetch(
+    url: str,
+    output_format: str = "markdown",
+    metadata_only: bool = False,
+    auth_session_id: Optional[str] = None,
+):
     """Run the fetch command synchronously."""
-    result = asyncio.run(fetch_url(url))
+    auth_storage_state_path = _resolve_cli_auth_storage(url, auth_session_id)
+    result = asyncio.run(fetch_url(url, auth_storage_state_path=auth_storage_state_path))
     
     if not result:
         print("❌ No content fetched.", file=sys.stderr)
@@ -122,12 +146,53 @@ def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
     uvicorn.run("main:app", host=host, port=port, reload=reload)
 
 
+async def _interactive_auth_login(domain: str, login_url: str, session_id: Optional[str], ttl_seconds: int):
+    from playwright.async_api import async_playwright
+
+    print(f"🔐 Opening browser for login at {login_url}")
+    print("   Complete sign-in in the opened browser, then return here and press Enter.")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+        input("Press Enter after login is complete...")
+        state = await context.storage_state()
+        await browser.close()
+    created = auth_session_store.create_session(
+        domain=domain,
+        storage_state=state,
+        ttl_seconds=ttl_seconds,
+        session_id=session_id,
+    )
+    print(json.dumps(created.to_dict(), indent=2))
+
+
+def run_auth_login(domain: str, login_url: Optional[str], session_id: Optional[str], ttl_seconds: int):
+    safe_domain = validate_domain_host(domain)
+    if not login_url:
+        login_url = f"https://{safe_domain}/login"
+    asyncio.run(_interactive_auth_login(safe_domain, login_url, session_id, ttl_seconds))
+
+
+def run_auth_status():
+    print(json.dumps({"sessions": auth_session_store.list_sessions()}, indent=2))
+
+
+def run_auth_revoke(session_id: str):
+    removed = auth_session_store.revoke_session(session_id)
+    if not removed:
+        print("❌ Session not found", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps({"status": "revoked", "session_id": session_id}, indent=2))
+
+
 def main():
     """Main CLI entry point."""
     # Pre-process arguments to support ghostfetch <url> directly
     # If the first positional argument is not a known command, assume it's a URL
     # and insert the 'fetch' command implicitly.
-    commands = ['serve', 'setup', 'fetch']
+    commands = ['serve', 'setup', 'fetch', 'auth']
     for i, arg in enumerate(sys.argv[1:], 1):
         if not arg.startswith('-'):
             if arg in commands:
@@ -162,6 +227,7 @@ Examples:
     fetch_shared.add_argument("--json", action="store_true", help="Output as JSON")
     fetch_shared.add_argument("--metadata-only", action="store_true", help="Only output metadata")
     fetch_shared.add_argument("--quiet", "-q", action="store_true", help="Suppress progress messages")
+    fetch_shared.add_argument("--auth-session-id", help="Authenticated session ID for login-gated pages")
 
     # Fetch command
     fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL (default command)", parents=[fetch_shared])
@@ -180,6 +246,18 @@ Examples:
     
     # Setup command
     setup_parser = subparsers.add_parser("setup", help="Install required browser dependencies")
+
+    auth_parser = subparsers.add_parser("auth", help="Manage authenticated sessions")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", help="Auth commands")
+    auth_login = auth_subparsers.add_parser("login", help="Open browser login and save session state")
+    auth_login.add_argument("--domain", required=True, help="Allowed domain for this session (e.g. linkedin.com)")
+    auth_login.add_argument("--login-url", help="Full login URL to open in browser")
+    auth_login.add_argument("--session-id", help="Optional session id")
+    auth_login.add_argument("--ttl-seconds", type=int, default=86400, help="Session TTL in seconds (default: 86400)")
+
+    auth_subparsers.add_parser("status", help="List auth sessions")
+    auth_revoke = auth_subparsers.add_parser("revoke", help="Revoke an auth session")
+    auth_revoke.add_argument("session_id", help="Session ID to revoke")
     
     args = parser.parse_args()
     
@@ -217,7 +295,31 @@ Examples:
             sys.exit(1)
         
         output_format = "json" if args.json else "markdown"
-        run_fetch(url, output_format=output_format, metadata_only=args.metadata_only)
+        run_fetch(
+            url,
+            output_format=output_format,
+            metadata_only=args.metadata_only,
+            auth_session_id=args.auth_session_id,
+        )
+
+    elif args.command == "auth":
+        if args.auth_command == "login":
+            if not ensure_browsers_installed(quiet=False):
+                print("❌ Browsers not installed. Run: ghostfetch setup", file=sys.stderr)
+                sys.exit(1)
+            run_auth_login(
+                domain=args.domain,
+                login_url=args.login_url,
+                session_id=args.session_id,
+                ttl_seconds=args.ttl_seconds,
+            )
+        elif args.auth_command == "status":
+            run_auth_status()
+        elif args.auth_command == "revoke":
+            run_auth_revoke(args.session_id)
+        else:
+            auth_parser.print_help()
+            sys.exit(1)
         
     else:
         parser.print_help()
