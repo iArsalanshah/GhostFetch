@@ -17,10 +17,9 @@ import subprocess
 import sys
 import os
 from typing import Optional
-from urllib.parse import urlparse
 from ghostfetch.version import __version__
 from src.auth_session import auth_session_store
-from src.utils.security import URLValidationError, validate_domain_host
+from src.utils.security import validate_domain_host
 
 
 def install_browsers(quiet: bool = False) -> bool:
@@ -94,12 +93,7 @@ async def fetch_url(
 def _resolve_cli_auth_storage(url: str, auth_session_id: Optional[str]) -> Optional[str]:
     if not auth_session_id:
         return None
-    session = auth_session_store.get_session(auth_session_id)
-    host = (urlparse(url).hostname or "").lower().rstrip(".")
-    if host != session.domain and not host.endswith(f".{session.domain}"):
-        raise URLValidationError("URL host does not match auth session domain")
-    auth_session_store.mark_used(auth_session_id)
-    return session.storage_state_path
+    return auth_session_store.resolve_storage_path(auth_session_id, url)
 
 
 def run_fetch(

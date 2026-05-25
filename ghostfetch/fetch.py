@@ -11,9 +11,7 @@ import asyncio
 import sys
 import os
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse
 from src.auth_session import auth_session_store
-from src.utils.security import URLValidationError
 
 # Add parent directory to path so we can import src modules
 _package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -53,12 +51,7 @@ async def fetch_async(
     from src.core.scraper import StealthScraper
     auth_storage_state_path = None
     if auth_session_id:
-        session = auth_session_store.get_session(auth_session_id)
-        host = (urlparse(url).hostname or "").lower().rstrip(".")
-        if host != session.domain and not host.endswith(f".{session.domain}"):
-            raise URLValidationError("URL host does not match auth session domain")
-        auth_session_store.mark_used(auth_session_id)
-        auth_storage_state_path = session.storage_state_path
+        auth_storage_state_path = auth_session_store.resolve_storage_path(auth_session_id, url)
     
     scraper = StealthScraper()
     try:

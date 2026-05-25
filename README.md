@@ -194,6 +194,9 @@ Create a `proxies.txt` file in the working directory with one proxy per line:
 Concurrency note:
 `MAX_CONCURRENT_BROWSERS` is a global browser-context cap shared by both sync and async fetch paths.
 
+Auth session storage note:
+Authenticated session state files are stored under `STORAGE_DIR/auth_sessions/` and may contain sensitive cookies. Keep `STORAGE_DIR` on a private filesystem with restricted access.
+
 ---
 
 ## 📈 Advanced Usage

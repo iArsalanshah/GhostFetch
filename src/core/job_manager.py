@@ -9,10 +9,8 @@ from typing import Dict, Optional, List
 import random
 import httpx
 from pydantic import BaseModel
-from urllib.parse import urlparse
 from src.utils.config import settings
 from src.auth_session import auth_session_store
-from src.utils.security import URLValidationError
 from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger("GhostFetch.JobManager")
@@ -194,12 +192,10 @@ class JobManager:
                         with JOB_DURATION.time():
                             auth_storage_state_path = None
                             if job.auth_session_id:
-                                auth_session = auth_session_store.get_session(job.auth_session_id)
-                                host = (urlparse(job.url).hostname or "").lower().rstrip(".")
-                                if host != auth_session.domain and not host.endswith(f".{auth_session.domain}"):
-                                    raise URLValidationError("URL host does not match auth session domain")
-                                auth_session_store.mark_used(job.auth_session_id)
-                                auth_storage_state_path = auth_session.storage_state_path
+                                auth_storage_state_path = auth_session_store.resolve_storage_path(
+                                    job.auth_session_id,
+                                    job.url,
+                                )
 
                             result = await self.scraper.fetch(
                                 job.url,

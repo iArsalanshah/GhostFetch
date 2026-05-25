@@ -6,7 +6,6 @@ import uvicorn
 import json
 import asyncio
 import time
-from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
@@ -86,12 +85,7 @@ class AuthSessionImportRequest(BaseModel):
 def _resolve_auth_storage_path(url: str, auth_session_id: Optional[str]) -> Optional[str]:
     if not auth_session_id:
         return None
-    session = auth_session_store.get_session(auth_session_id)
-    host = (urlparse(url).hostname or "").lower().rstrip(".")
-    if host != session.domain and not host.endswith(f".{session.domain}"):
-        raise URLValidationError("URL host does not match auth session domain")
-    auth_session_store.mark_used(auth_session_id)
-    return session.storage_state_path
+    return auth_session_store.resolve_storage_path(auth_session_id, url)
 
 
 def _enforce_api_key(x_api_key: Optional[str] = Header(None)) -> None:
