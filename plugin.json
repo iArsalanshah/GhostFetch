@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ghostfetch",
-  "version": "2026.5.25.1",
+  "version": "2026.8.6.1",
   "description": "Stealthy headless browser service for AI agents. Bypasses anti-bot protections and returns clean, LLM-friendly Markdown.",
   "author": {
     "name": "Arsalan Shah",
