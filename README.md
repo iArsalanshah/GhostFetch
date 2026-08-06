@@ -269,6 +269,50 @@ For GitHub integration, MCP Server configuration (Claude Desktop), and productio
 
 ---
 
+## 🤖 Agent Plugins Integration
+
+GhostFetch is packaged as a portable **Agent Plugin** conforming to the open, vendor-neutral [Agent Plugins 1.0.0](https://agent-plugins.org) standard. Any conformant agent client (Cursor, Claude Code, OpenAI Codex, etc.) can discover and load GhostFetch as a plugin.
+
+### Plugin Structure
+
+The plugin consists of two manifest files at the repository root:
+
+- **`plugin.json`** — The Agent Plugins manifest declaring the plugin metadata (name, version, author, license, keywords).
+- **`mcp.json`** — The MCP server connection configuration in Agent Plugins format.
+
+Additionally, the plugin includes:
+- **`skills/ghostfetch/SKILL.md`** — An Agent Skill (per the [Agent Skills specification](https://agentskills.io/specification)) that teaches agents how to use GhostFetch.
+
+### Loading the Plugin
+
+Conformant agent clients can load GhostFetch by pointing to this repository:
+
+```bash
+# Example: clone and install as a plugin
+git clone https://github.com/iArsalanshah/GhostFetch.git
+# The client reads plugin.json + mcp.json to discover capabilities
+```
+
+The `mcp.json` declares a single MCP server `ghostfetch` that runs via stdio:
+- **Command:** `python -m ghostfetch.mcp_server`
+- **Environment:** `SYNC_TIMEOUT_DEFAULT=120`, `MAX_SYNC_TIMEOUT=300`
+
+### Standalone MCP Server
+
+You can also run the MCP server directly without a plugin client:
+
+```bash
+# Start the MCP server (stdio transport)
+python -m ghostfetch.mcp_server
+
+# Or with custom timeouts
+SYNC_TIMEOUT_DEFAULT=60 MAX_SYNC_TIMEOUT=180 python -m ghostfetch.mcp_server
+```
+
+The server exposes GhostFetch's fetching capabilities as MCP tools that any MCP-compatible client can invoke.
+
+---
+
 ## 🛠 Troubleshooting
 
 *   **Browser Executable Missing**: Run `playwright install chromium`.
