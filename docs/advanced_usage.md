@@ -32,6 +32,8 @@ curl -X POST "http://localhost:8000/fetch" \
 
 GhostFetch includes an MCP server for integration with Claude Desktop and other MCP-aware agents.
 
+GhostFetch is also packaged as a portable **Agent Plugin** conforming to the open [Agent Plugins 1.0.0](https://agent-plugins.org) standard. Conformant agent clients (Cursor, Claude Code, OpenAI Codex, etc.) can load the plugin directly from the repo root via `plugin.json` + `mcp.json`, and an Agent Skill (`skills/ghostfetch/SKILL.md`) teaches agents how to use it. See the README's "Agent Plugins Integration" section for details. The root `mcp.json` is the Agent Plugins-format equivalent of the raw client config below.
+
 ### Configuration (`claude_desktop_config.json`)
 
 ```json

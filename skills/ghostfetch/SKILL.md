@@ -1,13 +1,9 @@
 ---
 name: ghostfetch
 description: Stealthy web fetching for AI agents. Bypasses blocks on X.com and other sites to return clean Markdown.
-homepage: https://github.com/iArsalanshah/GhostFetch
 metadata:
-  openclaw:
-    emoji: "👻"
-    requires:
-      bins:
-        - python3
+  openclaw-emoji: "👻"
+  openclaw-requires: "python3"
 ---
 
 # GhostFetch

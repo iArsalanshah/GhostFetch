@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "ghostfetch": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "ghostfetch.mcp_server"],
+      "env": {
+        "SYNC_TIMEOUT_DEFAULT": "120",
+        "MAX_SYNC_TIMEOUT": "300"
+      }
+    }
+  }
+}
