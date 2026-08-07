@@ -207,20 +207,48 @@ class MCPServer:
         return response
     
     async def run_stdio(self):
-        """Run the MCP server using stdio transport."""
+        """Run the MCP server using stdio transport.
 
-        reader = asyncio.StreamReader()
+        Auto-detects framing from the first line of input:
+        - Modern MCP clients (Codex, Cursor, VS Code, GitHub Copilot, etc.)
+          use newline-delimited JSON (the MCP stdio spec since 2024-11-05).
+        - Legacy clients (Claude Desktop) use Content-Length framed messages.
+
+        The detected framing is used for the whole session.
+        """
+        reader = asyncio.StreamReader(limit=MAX_MCP_MESSAGE_SIZE + 1)
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
-        
+
         writer_transport, writer_protocol = await asyncio.get_event_loop().connect_write_pipe(
             asyncio.streams.FlowControlMixin, sys.stdout
         )
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, asyncio.get_event_loop())
-        
+
+        first_line = await reader.readline()
+        if not first_line:
+            return
+        legacy = first_line.lstrip().lower().startswith(b"content-length:")
+        first = True
+
+        async def read_message() -> Optional[Dict[str, Any]]:
+            nonlocal first
+            buffered = first_line if first else None
+            first = False
+            if legacy:
+                return await self._read_framed_message(reader, buffered)
+            return await self._read_newline_message(reader, buffered)
+
+        async def write_message(payload: Dict[str, Any]) -> None:
+            if legacy:
+                writer.write(self._encode_framed_message(payload))
+            else:
+                writer.write(self._encode_newline_message(payload))
+            await writer.drain()
+
         while True:
             try:
-                message = await self._read_framed_message(reader)
+                message = await read_message()
                 if message is None:
                     return
             except Exception:
@@ -230,8 +258,7 @@ class MCPServer:
             if not response:
                 continue
 
-            writer.write(self._encode_framed_message(response))
-            await writer.drain()
+            await write_message(response)
 
     @staticmethod
     def _encode_framed_message(payload: Dict[str, Any]) -> bytes:
@@ -243,10 +270,20 @@ class MCPServer:
         return headers + body
 
     @staticmethod
-    async def _read_framed_message(reader: asyncio.StreamReader) -> Optional[Dict[str, Any]]:
+    def _encode_newline_message(payload: Dict[str, Any]) -> bytes:
+        """Encode a message in the modern newline-delimited MCP stdio format."""
+        return (json.dumps(payload) + "\n").encode("utf-8")
+
+    @staticmethod
+    async def _read_framed_message(
+        reader: asyncio.StreamReader,
+        first_line: Optional[bytes] = None,
+    ) -> Optional[Dict[str, Any]]:
         headers: Dict[str, str] = {}
+        line = first_line
         while True:
-            line = await reader.readline()
+            if line is None:
+                line = await reader.readline()
             if not line:
                 return None
             if line in (b"\r\n", b"\n"):
@@ -255,6 +292,7 @@ class MCPServer:
             if ":" in decoded:
                 key, value = decoded.split(":", 1)
                 headers[key.strip().lower()] = value.strip()
+            line = None
 
         content_length = headers.get("content-length")
         if not content_length:
@@ -268,6 +306,34 @@ class MCPServer:
 
         body = await reader.readexactly(size)
         return json.loads(body.decode("utf-8"))
+
+    @staticmethod
+    async def _read_newline_message(
+        reader: asyncio.StreamReader,
+        first_line: Optional[bytes] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read a message in the modern newline-delimited MCP stdio format.
+
+        Tolerates pretty-printed multi-line JSON by accumulating lines until a
+        complete JSON value can be parsed.
+        """
+        decoder = json.JSONDecoder()
+        buffer = ""
+        line = first_line
+        while True:
+            if line is None:
+                line = await reader.readline()
+            if not line:
+                return None
+            buffer += line.decode("utf-8")
+            if len(buffer) > MAX_MCP_MESSAGE_SIZE:
+                raise ValueError(f"Message too large: {len(buffer)} bytes (max {MAX_MCP_MESSAGE_SIZE})")
+            try:
+                obj, _ = decoder.raw_decode(buffer.lstrip())
+                return obj
+            except json.JSONDecodeError:
+                line = None
+                continue
 
 
 async def main():
